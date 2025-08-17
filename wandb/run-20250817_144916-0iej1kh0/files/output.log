@@ -1,0 +1,26 @@
+####
+args.num_iterations=305 args.num_envs=1024 args.num_eval_envs=16
+args.minibatch_size=512 args.batch_size=16384 args.update_epochs=8
+####
+Epoch: 1, global_step=0
+Evaluating
+Traceback (most recent call last):
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/lerobot_sim2real/scripts/train_fpo_rgb.py", line 34, in <module>
+    main(args)
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/lerobot_sim2real/scripts/train_fpo_rgb.py", line 30, in main
+    train(args=args.fpo)
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/lerobot_sim2real/rl/fpo_rgb.py", line 797, in train
+    cfm_loss, cfm_std = agent.evaluate_cfm_performance(eval_obs, eval_action)
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/lerobot_sim2real/rl/fpo_rgb.py", line 626, in evaluate_cfm_performance
+    self.v_theta(actions, taus_batch[:, 0], obs),  # Use first tau for model_v
+UnboundLocalError: local variable 'taus_batch' referenced before assignment
+Traceback (most recent call last):
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/lerobot_sim2real/scripts/train_fpo_rgb.py", line 34, in <module>
+    main(args)
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/lerobot_sim2real/scripts/train_fpo_rgb.py", line 30, in main
+    train(args=args.fpo)
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/lerobot_sim2real/rl/fpo_rgb.py", line 797, in train
+    cfm_loss, cfm_std = agent.evaluate_cfm_performance(eval_obs, eval_action)
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/lerobot_sim2real/rl/fpo_rgb.py", line 626, in evaluate_cfm_performance
+    self.v_theta(actions, taus_batch[:, 0], obs),  # Use first tau for model_v
+UnboundLocalError: local variable 'taus_batch' referenced before assignment

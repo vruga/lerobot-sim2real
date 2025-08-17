@@ -1,0 +1,640 @@
+####
+args.num_iterations=305 args.num_envs=1024 args.num_eval_envs=16
+args.minibatch_size=512 args.batch_size=16384 args.update_epochs=8
+####
+Epoch: 1, global_step=0
+Evaluating
+Evaluated 1024 steps resulting in 16 episodes
+eval_success_once_mean=0.0
+eval_return_mean=10.783838272094727
+eval_episode_len_mean=64.0
+eval_reward_mean=0.1684974730014801
+eval_success_at_end_mean=0.0
+model saved to runs/fpo-SO100GraspCube-v1-rgb-3/ckpt_1.pt
+Step 1024: Action norm: 47.19, Reward mean: 0.152
+Step 11264: Action norm: 47.87, Reward mean: 0.147
+SPS: 729
+Epoch: 2, global_step=16384
+Step 17408: Action norm: 47.25, Reward mean: 0.143
+Step 27648: Action norm: 46.60, Reward mean: 0.139
+SPS: 921
+Epoch: 3, global_step=32768
+Step 33792: Action norm: 47.64, Reward mean: 0.138
+Step 44032: Action norm: 47.45, Reward mean: 0.133
+SPS: 1008
+Epoch: 4, global_step=49152
+Step 50176: Action norm: 47.73, Reward mean: 0.129
+Step 60416: Action norm: 47.32, Reward mean: 0.136
+SPS: 1054
+Epoch: 5, global_step=65536
+Step 66560: Action norm: 47.49, Reward mean: 0.152
+Step 76800: Action norm: 47.06, Reward mean: 0.163
+SPS: 1088
+Epoch: 6, global_step=81920
+Step 82944: Action norm: 47.68, Reward mean: 0.167
+Step 93184: Action norm: 47.84, Reward mean: 0.180
+SPS: 1111
+Epoch: 7, global_step=98304
+Step 99328: Action norm: 47.51, Reward mean: 0.185
+Step 109568: Action norm: 46.91, Reward mean: 0.199
+SPS: 1128
+Epoch: 8, global_step=114688
+Step 115712: Action norm: 46.84, Reward mean: 0.204
+Step 125952: Action norm: 46.80, Reward mean: 0.216
+SPS: 1139
+Epoch: 9, global_step=131072
+Step 132096: Action norm: 49.78, Reward mean: 0.155
+Step 142336: Action norm: 47.77, Reward mean: 0.200
+SPS: 1151
+Epoch: 10, global_step=147456
+Step 148480: Action norm: 47.35, Reward mean: 0.217
+Step 158720: Action norm: 45.73, Reward mean: 0.236
+SPS: 1159
+Epoch: 11, global_step=163840
+Step 164864: Action norm: 46.07, Reward mean: 0.240
+Step 175104: Action norm: 45.54, Reward mean: 0.248
+SPS: 1166
+Epoch: 12, global_step=180224
+Step 181248: Action norm: 45.54, Reward mean: 0.252
+Step 191488: Action norm: 45.81, Reward mean: 0.256
+SPS: 1171
+Epoch: 13, global_step=196608
+Step 197632: Action norm: 60.75, Reward mean: 0.155
+Step 207872: Action norm: 47.61, Reward mean: 0.230
+SPS: 1177
+Epoch: 14, global_step=212992
+Step 214016: Action norm: 46.02, Reward mean: 0.252
+Step 224256: Action norm: 45.15, Reward mean: 0.268
+SPS: 1181
+Epoch: 15, global_step=229376
+Step 230400: Action norm: 45.39, Reward mean: 0.264
+Step 240640: Action norm: 44.66, Reward mean: 0.272
+SPS: 1185
+Epoch: 16, global_step=245760
+Step 246784: Action norm: 44.87, Reward mean: 0.268
+Step 257024: Action norm: 44.36, Reward mean: 0.266
+SPS: 1187
+Epoch: 17, global_step=262144
+Step 263168: Action norm: 66.49, Reward mean: 0.157
+Step 273408: Action norm: 47.27, Reward mean: 0.256
+SPS: 1190
+Epoch: 18, global_step=278528
+Step 279552: Action norm: 44.95, Reward mean: 0.275
+Step 289792: Action norm: 44.19, Reward mean: 0.280
+SPS: 1193
+Epoch: 19, global_step=294912
+Step 295936: Action norm: 43.88, Reward mean: 0.275
+Step 306176: Action norm: 44.47, Reward mean: 0.281
+SPS: 1196
+Epoch: 20, global_step=311296
+Step 312320: Action norm: 43.72, Reward mean: 0.279
+Step 322560: Action norm: 43.23, Reward mean: 0.280
+SPS: 1197
+Epoch: 21, global_step=327680
+Step 328704: Action norm: 74.73, Reward mean: 0.157
+Step 338944: Action norm: 48.41, Reward mean: 0.277
+SPS: 1199
+Epoch: 22, global_step=344064
+Step 345088: Action norm: 44.43, Reward mean: 0.307
+Step 355328: Action norm: 42.82, Reward mean: 0.305
+SPS: 1201
+Epoch: 23, global_step=360448
+Step 361472: Action norm: 43.54, Reward mean: 0.295
+Step 371712: Action norm: 43.18, Reward mean: 0.290
+SPS: 1203
+Epoch: 24, global_step=376832
+Step 377856: Action norm: 42.92, Reward mean: 0.286
+Step 388096: Action norm: 42.15, Reward mean: 0.283
+SPS: 1204
+Epoch: 25, global_step=393216
+Step 394240: Action norm: 82.87, Reward mean: 0.159
+Step 404480: Action norm: 48.12, Reward mean: 0.298
+SPS: 1206
+Epoch: 26, global_step=409600
+Evaluating
+Evaluated 1024 steps resulting in 16 episodes
+eval_success_once_mean=0.0
+eval_return_mean=19.808841705322266
+eval_episode_len_mean=64.0
+eval_reward_mean=0.3095131516456604
+eval_success_at_end_mean=0.0
+model saved to runs/fpo-SO100GraspCube-v1-rgb-3/ckpt_26.pt
+Step 410624: Action norm: 44.64, Reward mean: 0.327
+Step 420864: Action norm: 43.09, Reward mean: 0.313
+SPS: 1179
+Epoch: 27, global_step=425984
+Step 427008: Action norm: 43.40, Reward mean: 0.303
+Step 437248: Action norm: 42.24, Reward mean: 0.304
+SPS: 1181
+Epoch: 28, global_step=442368
+Step 443392: Action norm: 41.99, Reward mean: 0.302
+Step 453632: Action norm: 42.22, Reward mean: 0.297
+SPS: 1182
+Epoch: 29, global_step=458752
+Step 459776: Action norm: 95.87, Reward mean: 0.160
+Step 470016: Action norm: 48.56, Reward mean: 0.326
+SPS: 1185
+Epoch: 30, global_step=475136
+Step 476160: Action norm: 45.09, Reward mean: 0.345
+Step 486400: Action norm: 42.15, Reward mean: 0.320
+SPS: 1186
+Epoch: 31, global_step=491520
+Step 492544: Action norm: 42.13, Reward mean: 0.309
+Step 502784: Action norm: 41.76, Reward mean: 0.305
+SPS: 1188
+Epoch: 32, global_step=507904
+Step 508928: Action norm: 41.66, Reward mean: 0.302
+Step 519168: Action norm: 40.98, Reward mean: 0.296
+SPS: 1189
+Epoch: 33, global_step=524288
+Step 525312: Action norm: 99.31, Reward mean: 0.155
+Step 535552: Action norm: 51.11, Reward mean: 0.314
+SPS: 1191
+Epoch: 34, global_step=540672
+Step 541696: Action norm: 42.42, Reward mean: 0.341
+Step 551936: Action norm: 42.23, Reward mean: 0.328
+SPS: 1193
+Epoch: 35, global_step=557056
+Step 558080: Action norm: 41.22, Reward mean: 0.327
+Step 568320: Action norm: 41.74, Reward mean: 0.317
+SPS: 1195
+Epoch: 36, global_step=573440
+Step 574464: Action norm: 41.24, Reward mean: 0.310
+Step 584704: Action norm: 40.37, Reward mean: 0.305
+SPS: 1202
+Epoch: 37, global_step=589824
+Step 590848: Action norm: 105.44, Reward mean: 0.157
+Step 601088: Action norm: 52.59, Reward mean: 0.320
+SPS: 1221
+Epoch: 38, global_step=606208
+Step 607232: Action norm: 43.47, Reward mean: 0.352
+Step 617472: Action norm: 42.56, Reward mean: 0.337
+SPS: 1227
+Epoch: 39, global_step=622592
+Step 623616: Action norm: 41.43, Reward mean: 0.337
+Step 633856: Action norm: 42.13, Reward mean: 0.322
+SPS: 1240
+Epoch: 40, global_step=638976
+Step 640000: Action norm: 40.92, Reward mean: 0.322
+Step 650240: Action norm: 40.16, Reward mean: 0.317
+SPS: 1263
+Epoch: 41, global_step=655360
+Step 656384: Action norm: 108.41, Reward mean: 0.158
+Step 666624: Action norm: 52.87, Reward mean: 0.316
+SPS: 1272
+Epoch: 42, global_step=671744
+Step 672768: Action norm: 44.19, Reward mean: 0.356
+Step 683008: Action norm: 42.92, Reward mean: 0.345
+SPS: 1279
+Epoch: 43, global_step=688128
+Step 689152: Action norm: 42.80, Reward mean: 0.343
+Step 699392: Action norm: 41.48, Reward mean: 0.338
+SPS: 1298
+Epoch: 44, global_step=704512
+Step 705536: Action norm: 41.32, Reward mean: 0.338
+Step 715776: Action norm: 41.04, Reward mean: 0.332
+SPS: 1319
+Epoch: 45, global_step=720896
+Step 721920: Action norm: 111.79, Reward mean: 0.158
+Step 732160: Action norm: 53.70, Reward mean: 0.326
+SPS: 1340
+Epoch: 46, global_step=737280
+Step 738304: Action norm: 42.82, Reward mean: 0.350
+Step 748544: Action norm: 41.82, Reward mean: 0.333
+SPS: 1352
+Epoch: 47, global_step=753664
+Step 754688: Action norm: 41.66, Reward mean: 0.331
+Step 764928: Action norm: 41.19, Reward mean: 0.313
+SPS: 1373
+Epoch: 48, global_step=770048
+Step 771072: Action norm: 41.75, Reward mean: 0.309
+Step 781312: Action norm: 40.80, Reward mean: 0.297
+SPS: 1393
+Epoch: 49, global_step=786432
+Step 787456: Action norm: 115.34, Reward mean: 0.160
+Step 797696: Action norm: 54.60, Reward mean: 0.331
+SPS: 1400
+Epoch: 50, global_step=802816
+Step 803840: Action norm: 45.31, Reward mean: 0.358
+Step 814080: Action norm: 42.27, Reward mean: 0.341
+SPS: 1407
+Epoch: 51, global_step=819200
+Evaluating
+Evaluated 1024 steps resulting in 16 episodes
+eval_success_once_mean=0.0
+eval_return_mean=19.19513702392578
+eval_episode_len_mean=64.0
+eval_reward_mean=0.29992401599884033
+eval_success_at_end_mean=0.0
+model saved to runs/fpo-SO100GraspCube-v1-rgb-3/ckpt_51.pt
+Step 820224: Action norm: 42.24, Reward mean: 0.325
+Step 830464: Action norm: 40.48, Reward mean: 0.320
+SPS: 1405
+Epoch: 52, global_step=835584
+Step 836608: Action norm: 39.26, Reward mean: 0.312
+Step 846848: Action norm: 40.33, Reward mean: 0.307
+SPS: 1413
+Epoch: 53, global_step=851968
+Step 852992: Action norm: 121.45, Reward mean: 0.159
+Step 863232: Action norm: 56.81, Reward mean: 0.339
+SPS: 1425
+Epoch: 54, global_step=868352
+Step 869376: Action norm: 44.16, Reward mean: 0.368
+Step 879616: Action norm: 42.34, Reward mean: 0.355
+SPS: 1441
+Epoch: 55, global_step=884736
+Step 885760: Action norm: 41.24, Reward mean: 0.346
+Step 896000: Action norm: 40.66, Reward mean: 0.330
+SPS: 1451
+Epoch: 56, global_step=901120
+Step 902144: Action norm: 40.21, Reward mean: 0.322
+Step 912384: Action norm: 39.17, Reward mean: 0.313
+SPS: 1466
+Epoch: 57, global_step=917504
+Step 918528: Action norm: 118.53, Reward mean: 0.157
+Step 928768: Action norm: 53.83, Reward mean: 0.322
+SPS: 1480
+Epoch: 58, global_step=933888
+Step 934912: Action norm: 42.45, Reward mean: 0.356
+Step 945152: Action norm: 40.15, Reward mean: 0.352
+SPS: 1497
+Epoch: 59, global_step=950272
+Step 951296: Action norm: 39.60, Reward mean: 0.354
+Step 961536: Action norm: 38.55, Reward mean: 0.331
+SPS: 1515
+Epoch: 60, global_step=966656
+Step 967680: Action norm: 38.63, Reward mean: 0.333
+Step 977920: Action norm: 37.78, Reward mean: 0.326
+SPS: 1527
+Epoch: 61, global_step=983040
+Step 984064: Action norm: 120.49, Reward mean: 0.159
+Step 994304: Action norm: 52.92, Reward mean: 0.337
+SPS: 1536
+Epoch: 62, global_step=999424
+Step 1000448: Action norm: 41.30, Reward mean: 0.351
+Step 1010688: Action norm: 39.97, Reward mean: 0.340
+SPS: 1548
+Epoch: 63, global_step=1015808
+Step 1016832: Action norm: 38.06, Reward mean: 0.327
+Step 1027072: Action norm: 37.73, Reward mean: 0.316
+SPS: 1565
+Epoch: 64, global_step=1032192
+Step 1033216: Action norm: 37.48, Reward mean: 0.321
+Step 1043456: Action norm: 36.53, Reward mean: 0.307
+SPS: 1575
+Epoch: 65, global_step=1048576
+Step 1049600: Action norm: 120.96, Reward mean: 0.159
+Step 1059840: Action norm: 52.02, Reward mean: 0.324
+SPS: 1584
+Epoch: 66, global_step=1064960
+Step 1065984: Action norm: 42.89, Reward mean: 0.340
+Step 1076224: Action norm: 39.86, Reward mean: 0.341
+SPS: 1595
+Epoch: 67, global_step=1081344
+Step 1082368: Action norm: 39.45, Reward mean: 0.331
+Step 1092608: Action norm: 37.76, Reward mean: 0.326
+SPS: 1608
+Epoch: 68, global_step=1097728
+Step 1098752: Action norm: 38.57, Reward mean: 0.324
+Step 1108992: Action norm: 37.42, Reward mean: 0.311
+SPS: 1623
+Epoch: 69, global_step=1114112
+Step 1115136: Action norm: 121.72, Reward mean: 0.160
+Step 1125376: Action norm: 53.50, Reward mean: 0.341
+SPS: 1635
+Epoch: 70, global_step=1130496
+Step 1131520: Action norm: 42.82, Reward mean: 0.379
+Step 1141760: Action norm: 39.96, Reward mean: 0.361
+SPS: 1645
+Epoch: 71, global_step=1146880
+Step 1147904: Action norm: 39.52, Reward mean: 0.357
+Step 1158144: Action norm: 38.16, Reward mean: 0.332
+SPS: 1660
+Epoch: 72, global_step=1163264
+Step 1164288: Action norm: 37.98, Reward mean: 0.321
+Step 1174528: Action norm: 37.54, Reward mean: 0.310
+SPS: 1672
+Epoch: 73, global_step=1179648
+Step 1180672: Action norm: 118.30, Reward mean: 0.157
+Step 1190912: Action norm: 53.90, Reward mean: 0.330
+SPS: 1681
+Epoch: 74, global_step=1196032
+Step 1197056: Action norm: 42.51, Reward mean: 0.348
+Step 1207296: Action norm: 38.94, Reward mean: 0.350
+SPS: 1697
+Epoch: 75, global_step=1212416
+Step 1213440: Action norm: 38.67, Reward mean: 0.347
+Step 1223680: Action norm: 37.16, Reward mean: 0.331
+SPS: 1712
+Epoch: 76, global_step=1228800
+Evaluating
+Evaluated 1024 steps resulting in 16 episodes
+eval_success_once_mean=0.0
+eval_return_mean=20.682422637939453
+eval_episode_len_mean=64.0
+eval_reward_mean=0.32316285371780396
+eval_success_at_end_mean=0.0
+model saved to runs/fpo-SO100GraspCube-v1-rgb-3/ckpt_76.pt
+Step 1229824: Action norm: 37.02, Reward mean: 0.324
+Step 1240064: Action norm: 36.33, Reward mean: 0.309
+SPS: 1704
+Epoch: 77, global_step=1245184
+Step 1246208: Action norm: 121.21, Reward mean: 0.157
+Step 1256448: Action norm: 52.15, Reward mean: 0.318
+SPS: 1715
+Epoch: 78, global_step=1261568
+Step 1262592: Action norm: 41.05, Reward mean: 0.334
+Step 1272832: Action norm: 37.51, Reward mean: 0.336
+SPS: 1728
+Epoch: 79, global_step=1277952
+Step 1278976: Action norm: 37.78, Reward mean: 0.332
+Step 1289216: Action norm: 36.18, Reward mean: 0.324
+SPS: 1738
+Epoch: 80, global_step=1294336
+Step 1295360: Action norm: 35.82, Reward mean: 0.318
+Step 1305600: Action norm: 35.42, Reward mean: 0.309
+SPS: 1752
+Epoch: 81, global_step=1310720
+Step 1311744: Action norm: 121.33, Reward mean: 0.158
+Step 1321984: Action norm: 54.27, Reward mean: 0.331
+SPS: 1762
+Epoch: 82, global_step=1327104
+Step 1328128: Action norm: 41.83, Reward mean: 0.362
+Step 1338368: Action norm: 38.87, Reward mean: 0.357
+SPS: 1776
+Epoch: 83, global_step=1343488
+Step 1344512: Action norm: 38.01, Reward mean: 0.352
+Step 1354752: Action norm: 37.17, Reward mean: 0.338
+SPS: 1784
+Epoch: 84, global_step=1359872
+Step 1360896: Action norm: 37.83, Reward mean: 0.320
+Step 1371136: Action norm: 37.58, Reward mean: 0.308
+SPS: 1798
+Epoch: 85, global_step=1376256
+Step 1377280: Action norm: 121.73, Reward mean: 0.159
+Step 1387520: Action norm: 55.53, Reward mean: 0.338
+SPS: 1806
+Epoch: 86, global_step=1392640
+Step 1393664: Action norm: 42.73, Reward mean: 0.369
+Step 1403904: Action norm: 38.57, Reward mean: 0.364
+SPS: 1820
+Epoch: 87, global_step=1409024
+Step 1410048: Action norm: 38.16, Reward mean: 0.357
+Step 1420288: Action norm: 38.64, Reward mean: 0.333
+SPS: 1834
+Epoch: 88, global_step=1425408
+Step 1426432: Action norm: 39.12, Reward mean: 0.319
+Step 1436672: Action norm: 38.57, Reward mean: 0.305
+SPS: 1845
+Epoch: 89, global_step=1441792
+Step 1442816: Action norm: 127.19, Reward mean: 0.157
+Step 1453056: Action norm: 56.89, Reward mean: 0.340
+SPS: 1854
+Epoch: 90, global_step=1458176
+Step 1459200: Action norm: 44.19, Reward mean: 0.367
+Step 1469440: Action norm: 38.17, Reward mean: 0.355
+SPS: 1868
+Epoch: 91, global_step=1474560
+Step 1475584: Action norm: 39.17, Reward mean: 0.344
+Step 1485824: Action norm: 39.04, Reward mean: 0.322
+SPS: 1882
+Epoch: 92, global_step=1490944
+Step 1491968: Action norm: 39.43, Reward mean: 0.328
+Step 1502208: Action norm: 38.71, Reward mean: 0.314
+SPS: 1893
+Epoch: 93, global_step=1507328
+Step 1508352: Action norm: 123.96, Reward mean: 0.159
+Step 1518592: Action norm: 56.95, Reward mean: 0.319
+SPS: 1893
+Epoch: 94, global_step=1523712
+Step 1524736: Action norm: 43.76, Reward mean: 0.359
+Step 1534976: Action norm: 38.83, Reward mean: 0.350
+SPS: 1890
+Epoch: 95, global_step=1540096
+Step 1541120: Action norm: 38.71, Reward mean: 0.345
+Step 1551360: Action norm: 37.84, Reward mean: 0.335
+SPS: 1888
+Epoch: 96, global_step=1556480
+Step 1557504: Action norm: 37.60, Reward mean: 0.330
+Step 1567744: Action norm: 37.25, Reward mean: 0.314
+SPS: 1880
+Epoch: 97, global_step=1572864
+Step 1573888: Action norm: 123.42, Reward mean: 0.159
+Step 1584128: Action norm: 58.38, Reward mean: 0.328
+SPS: 1885
+Epoch: 98, global_step=1589248
+Step 1590272: Action norm: 45.01, Reward mean: 0.361
+Step 1600512: Action norm: 39.03, Reward mean: 0.351
+SPS: 1887
+Epoch: 99, global_step=1605632
+Step 1606656: Action norm: 39.13, Reward mean: 0.340
+Step 1616896: Action norm: 37.96, Reward mean: 0.326
+SPS: 1885
+Epoch: 100, global_step=1622016
+Step 1623040: Action norm: 36.91, Reward mean: 0.316
+Step 1633280: Action norm: 36.53, Reward mean: 0.306
+SPS: 1884
+Epoch: 101, global_step=1638400
+Evaluating
+Evaluated 1024 steps resulting in 16 episodes
+eval_success_once_mean=0.0
+eval_return_mean=20.431488037109375
+eval_episode_len_mean=64.0
+eval_reward_mean=0.319242000579834
+eval_success_at_end_mean=0.0
+model saved to runs/fpo-SO100GraspCube-v1-rgb-3/ckpt_101.pt
+Step 1639424: Action norm: 120.93, Reward mean: 0.157
+Step 1649664: Action norm: 56.67, Reward mean: 0.309
+SPS: 1871
+Epoch: 102, global_step=1654784
+Step 1655808: Action norm: 44.17, Reward mean: 0.358
+Step 1666048: Action norm: 38.99, Reward mean: 0.352
+SPS: 1877
+Epoch: 103, global_step=1671168
+Step 1672192: Action norm: 38.57, Reward mean: 0.337
+Step 1682432: Action norm: 37.85, Reward mean: 0.321
+SPS: 1876
+Epoch: 104, global_step=1687552
+Step 1688576: Action norm: 37.46, Reward mean: 0.312
+Step 1698816: Action norm: 36.89, Reward mean: 0.301
+SPS: 1878
+Epoch: 105, global_step=1703936
+Step 1704960: Action norm: 120.56, Reward mean: 0.158
+Step 1715200: Action norm: 56.17, Reward mean: 0.309
+SPS: 1879
+Epoch: 106, global_step=1720320
+Step 1721344: Action norm: 43.88, Reward mean: 0.356
+Step 1731584: Action norm: 38.59, Reward mean: 0.330
+SPS: 1880
+Epoch: 107, global_step=1736704
+Step 1737728: Action norm: 37.99, Reward mean: 0.321
+Step 1747968: Action norm: 37.59, Reward mean: 0.306
+SPS: 1879
+Epoch: 108, global_step=1753088
+Step 1754112: Action norm: 36.29, Reward mean: 0.301
+Step 1764352: Action norm: 36.08, Reward mean: 0.291
+SPS: 1884
+Epoch: 109, global_step=1769472
+Step 1770496: Action norm: 118.33, Reward mean: 0.155
+Step 1780736: Action norm: 54.53, Reward mean: 0.292
+SPS: 1886
+Epoch: 110, global_step=1785856
+Step 1786880: Action norm: 42.60, Reward mean: 0.328
+Step 1797120: Action norm: 38.04, Reward mean: 0.310
+SPS: 1885
+Epoch: 111, global_step=1802240
+Step 1803264: Action norm: 36.79, Reward mean: 0.308
+Step 1813504: Action norm: 35.96, Reward mean: 0.294
+SPS: 1890
+Epoch: 112, global_step=1818624
+Step 1819648: Action norm: 35.84, Reward mean: 0.289
+Step 1829888: Action norm: 35.53, Reward mean: 0.284
+SPS: 1887
+Epoch: 113, global_step=1835008
+Step 1836032: Action norm: 117.98, Reward mean: 0.160
+Step 1846272: Action norm: 53.62, Reward mean: 0.288
+SPS: 1891
+Epoch: 114, global_step=1851392
+Step 1852416: Action norm: 42.42, Reward mean: 0.319
+Step 1862656: Action norm: 37.43, Reward mean: 0.301
+SPS: 1892
+Epoch: 115, global_step=1867776
+Step 1868800: Action norm: 36.13, Reward mean: 0.296
+Step 1879040: Action norm: 35.32, Reward mean: 0.288
+SPS: 1891
+Epoch: 116, global_step=1884160
+Step 1885184: Action norm: 34.88, Reward mean: 0.282
+Step 1895424: Action norm: 34.75, Reward mean: 0.276
+SPS: 1887
+Epoch: 117, global_step=1900544
+Step 1901568: Action norm: 117.45, Reward mean: 0.156
+Step 1911808: Action norm: 52.93, Reward mean: 0.280
+SPS: 1890
+Epoch: 118, global_step=1916928
+Step 1917952: Action norm: 42.27, Reward mean: 0.303
+Step 1928192: Action norm: 37.06, Reward mean: 0.281
+SPS: 1890
+Epoch: 119, global_step=1933312
+Step 1934336: Action norm: 36.43, Reward mean: 0.279
+Step 1944576: Action norm: 35.09, Reward mean: 0.273
+SPS: 1889
+Epoch: 120, global_step=1949696
+Step 1950720: Action norm: 35.69, Reward mean: 0.268
+Step 1960960: Action norm: 34.34, Reward mean: 0.263
+SPS: 1888
+Epoch: 121, global_step=1966080
+Step 1967104: Action norm: 117.06, Reward mean: 0.158
+Step 1977344: Action norm: 50.35, Reward mean: 0.270
+SPS: 1890
+Epoch: 122, global_step=1982464
+Step 1983488: Action norm: 40.44, Reward mean: 0.288
+Step 1993728: Action norm: 37.07, Reward mean: 0.271
+SPS: 1893
+Epoch: 123, global_step=1998848
+Step 1999872: Action norm: 35.88, Reward mean: 0.268
+Step 2010112: Action norm: 34.84, Reward mean: 0.263
+SPS: 1892
+Epoch: 124, global_step=2015232
+Step 2016256: Action norm: 34.74, Reward mean: 0.259
+Step 2026496: Action norm: 33.99, Reward mean: 0.255
+SPS: 1892
+Epoch: 125, global_step=2031616
+Step 2032640: Action norm: 118.10, Reward mean: 0.156
+Step 2042880: Action norm: 49.83, Reward mean: 0.258
+SPS: 1893
+Epoch: 126, global_step=2048000
+Evaluating
+Evaluated 1024 steps resulting in 16 episodes
+eval_success_once_mean=0.0
+eval_return_mean=15.07599925994873
+eval_episode_len_mean=64.0
+eval_reward_mean=0.2355624884366989
+eval_success_at_end_mean=0.0
+model saved to runs/fpo-SO100GraspCube-v1-rgb-3/ckpt_126.pt
+Step 2049024: Action norm: 41.40, Reward mean: 0.275
+Step 2059264: Action norm: 36.34, Reward mean: 0.261
+SPS: 1879
+Epoch: 127, global_step=2064384
+Step 2065408: Action norm: 35.79, Reward mean: 0.256
+Step 2075648: Action norm: 34.66, Reward mean: 0.250
+SPS: 1880
+Epoch: 128, global_step=2080768
+Step 2081792: Action norm: 34.51, Reward mean: 0.249
+Step 2092032: Action norm: 34.17, Reward mean: 0.246
+SPS: 1880
+Epoch: 129, global_step=2097152
+Step 2098176: Action norm: 115.63, Reward mean: 0.155
+Step 2108416: Action norm: 49.84, Reward mean: 0.255
+SPS: 1881
+Epoch: 130, global_step=2113536
+Step 2114560: Action norm: 41.34, Reward mean: 0.274
+Step 2124800: Action norm: 35.89, Reward mean: 0.258
+SPS: 1883
+Epoch: 131, global_step=2129920
+Step 2130944: Action norm: 34.94, Reward mean: 0.254
+Step 2141184: Action norm: 33.87, Reward mean: 0.247
+SPS: 1880
+Epoch: 132, global_step=2146304
+Step 2147328: Action norm: 33.93, Reward mean: 0.245
+Step 2157568: Action norm: 33.60, Reward mean: 0.242
+SPS: 1879
+Epoch: 133, global_step=2162688
+Step 2163712: Action norm: 115.95, Reward mean: 0.156
+Step 2173952: Action norm: 48.71, Reward mean: 0.248
+SPS: 1880
+Epoch: 134, global_step=2179072
+Step 2180096: Action norm: 40.63, Reward mean: 0.267
+Step 2190336: Action norm: 35.59, Reward mean: 0.256
+SPS: 1882
+Epoch: 135, global_step=2195456
+Step 2196480: Action norm: 35.37, Reward mean: 0.250
+Step 2206720: Action norm: 34.47, Reward mean: 0.247
+SPS: 1880
+Epoch: 136, global_step=2211840
+Step 2212864: Action norm: 34.14, Reward mean: 0.245
+Step 2223104: Action norm: 33.69, Reward mean: 0.241
+SPS: 1879
+Epoch: 137, global_step=2228224
+Step 2229248: Action norm: 114.80, Reward mean: 0.157
+Step 2239488: Action norm: 48.84, Reward mean: 0.244
+SPS: 1881
+Epoch: 138, global_step=2244608
+Step 2245632: Action norm: 41.11, Reward mean: 0.257
+Step 2255872: Action norm: 35.72, Reward mean: 0.245
+SPS: 1882
+Epoch: 139, global_step=2260992
+Step 2262016: Action norm: 35.39, Reward mean: 0.239
+Step 2272256: Action norm: 34.26, Reward mean: 0.233
+SPS: 1881
+Epoch: 140, global_step=2277376
+Step 2278400: Action norm: 33.47, Reward mean: 0.232
+Step 2288640: Action norm: 33.70, Reward mean: 0.230
+Traceback (most recent call last):
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/lerobot_sim2real/scripts/train_fpo_rgb.py", line 34, in <module>
+    main(args)
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/lerobot_sim2real/scripts/train_fpo_rgb.py", line 30, in main
+    train(args=args.fpo)
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/lerobot_sim2real/rl/fpo_rgb.py", line 680, in train
+    # Snapshot θ_old ONCE per update
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/lerobot_sim2real/scripts/train_fpo_rgb.py", line 34, in <module>
+    main(args)
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/lerobot_sim2real/scripts/train_fpo_rgb.py", line 30, in main
+    train(args=args.fpo)
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/lerobot_sim2real/rl/fpo_rgb.py", line 680, in train
+    # Snapshot θ_old ONCE per update
+KeyboardInterrupt
+Exception ignored in atexit callback: <function _start_and_connect_service.<locals>.teardown_atexit at 0x786577419480>
+Traceback (most recent call last):
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/.venv/lib/python3.10/site-packages/wandb/sdk/lib/service/service_connection.py", line 54, in teardown_atexit
+    conn.teardown(hooks.exit_code)
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/.venv/lib/python3.10/site-packages/wandb/sdk/lib/service/service_connection.py", line 182, in teardown
+    self._router.join()
+  File "/home/sra-vjti/ksagar/lerobot-sim2real/.venv/lib/python3.10/site-packages/wandb/sdk/interface/router.py", line 75, in join
+    self._thread.join()
+  File "/usr/lib/python3.10/threading.py", line 1096, in join
+    self._wait_for_tstate_lock()
+  File "/usr/lib/python3.10/threading.py", line 1116, in _wait_for_tstate_lock
+    if lock.acquire(block, timeout):
+KeyboardInterrupt:

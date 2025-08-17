@@ -1,0 +1,252 @@
+_wandb:
+    value:
+        cli_version: 0.21.1
+        code_path: code/lerobot_sim2real/scripts/train_fpo_rgb.py
+        e:
+            ikpw44watlqbznbpp3ljcitocl5t76k8:
+                args:
+                    - --env-id=SO100GraspCube-v1
+                    - --env-kwargs-json-path=env_config.json
+                    - --fpo.seed=3
+                    - --fpo.num_envs=1024
+                    - --fpo.num-steps=16
+                    - --fpo.update_epochs=8
+                    - --fpo.num_minibatches=32
+                    - --fpo.total_timesteps=5_000_000
+                    - --fpo.gamma=0.9
+                    - --fpo.num_eval_envs=16
+                    - --fpo.num-eval-steps=64
+                    - --fpo.no-partial-reset
+                    - --fpo.cfm_loss_coef=1.0
+                    - --fpo.cfm_sample_taus=4
+                    - --fpo.fpo_ratio_clip_coef=0.2
+                    - --fpo.exp-name=fpo-SO100GraspCube-v1-rgb-3
+                    - --fpo.track
+                    - --fpo.wandb_project_name
+                    - SO100-ManiSkill
+                codePath: lerobot_sim2real/scripts/train_fpo_rgb.py
+                codePathLocal: lerobot_sim2real/scripts/train_fpo_rgb.py
+                cpu_count: 16
+                cpu_count_logical: 24
+                cudaVersion: "12.2"
+                disk:
+                    /:
+                        total: "502392610816"
+                        used: "91812122624"
+                email: voidz7447@gmail.com
+                executable: /home/sra-vjti/ksagar/lerobot-sim2real/.venv/bin/python
+                git:
+                    commit: 43d6ac458da54cd227cf09fc68439a6b48074547
+                    remote: https://github.com/StoneT2000/lerobot-sim2real
+                gpu: NVIDIA GeForce RTX 3060
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ampere
+                      cudaCores: 3584
+                      memoryTotal: "12884901888"
+                      name: NVIDIA GeForce RTX 3060
+                      uuid: GPU-c7cddaaa-bef0-4bfb-a43d-4d6d008e2c0b
+                host: mini-omen
+                memory:
+                    total: "16506109952"
+                os: Linux-6.8.0-65-generic-x86_64-with-glibc2.35
+                program: /home/sra-vjti/ksagar/lerobot-sim2real/lerobot_sim2real/scripts/train_fpo_rgb.py
+                python: CPython 3.10.12
+                root: /home/sra-vjti/ksagar/lerobot-sim2real
+                startedAt: "2025-08-17T12:17:43.311256Z"
+                writerId: ikpw44watlqbznbpp3ljcitocl5t76k8
+        m: []
+        python_version: 3.10.12
+        t:
+            "1":
+                - 1
+                - 49
+            "2":
+                - 1
+                - 49
+            "3":
+                - 13
+                - 15
+                - 16
+                - 61
+            "4": 3.10.12
+            "5": 0.21.1
+            "12": 0.21.1
+            "13": linux-x86_64
+anneal_lr:
+    value: false
+batch_size:
+    value: 16384
+capture_video:
+    value: true
+cfm_loss_coef:
+    value: 1
+cfm_noise_schedule:
+    value: linear
+cfm_sample_taus:
+    value: 4
+cfm_tau_max:
+    value: 0.99
+cfm_tau_min:
+    value: 0.01
+checkpoint:
+    value: null
+clip_coef:
+    value: 0.2
+clip_vloss:
+    value: false
+control_mode:
+    value: null
+cuda:
+    value: true
+ent_coef:
+    value: 0
+env_cfg:
+    value:
+        base_camera_settings:
+            fov: 0.8256
+            pos:
+                - 0.6899999976158142
+                - 0.3700000047683716
+                - 0.2800000011920929
+            target:
+                - 0.1850000023841858
+                - -0.15000000596046448
+                - 0
+        domain_randomization_config:
+            robot_color: null
+        env_horizon: 64
+        env_id: SO100GraspCube-v1
+        greenscreen_overlay_path: null
+        num_envs: 1024
+        obs_mode: rgb+segmentation
+        partial_reset: false
+        render_mode: all
+        reward_mode: normalized_dense
+        sim_backend: physx_cuda
+        spawn_box_half_size: 0.1
+        spawn_box_pos:
+            - 0.3
+            - 0.05
+env_id:
+    value: SO100GraspCube-v1
+env_kwargs:
+    value:
+        base_camera_settings:
+            fov: 0.8256
+            pos:
+                - 0.6899999976158142
+                - 0.3700000047683716
+                - 0.2800000011920929
+            target:
+                - 0.1850000023841858
+                - -0.15000000596046448
+                - 0
+        domain_randomization_config:
+            robot_color: null
+        greenscreen_overlay_path: null
+        spawn_box_half_size: 0.1
+        spawn_box_pos:
+            - 0.3
+            - 0.05
+eval_env_cfg:
+    value:
+        base_camera_settings:
+            fov: 0.8256
+            pos:
+                - 0.6899999976158142
+                - 0.3700000047683716
+                - 0.2800000011920929
+            target:
+                - 0.1850000023841858
+                - -0.15000000596046448
+                - 0
+        domain_randomization_config:
+            robot_color: null
+        env_horizon: 64
+        env_id: SO100GraspCube-v1
+        greenscreen_overlay_path: null
+        num_envs: 16
+        obs_mode: rgb+segmentation
+        partial_reset: false
+        render_mode: all
+        reward_mode: normalized_dense
+        sim_backend: physx_cuda
+        spawn_box_half_size: 0.1
+        spawn_box_pos:
+            - 0.3
+            - 0.05
+eval_freq:
+    value: 25
+eval_partial_reset:
+    value: false
+eval_reconfiguration_freq:
+    value: 1
+evaluate:
+    value: false
+exp_name:
+    value: fpo-SO100GraspCube-v1-rgb-3
+finite_horizon_gae:
+    value: false
+flow_num_steps:
+    value: 10
+fpo_ratio_clip_coef:
+    value: 0.2
+gae_lambda:
+    value: 0.9
+gamma:
+    value: 0.9
+include_state:
+    value: true
+learning_rate:
+    value: 0.0003
+max_grad_norm:
+    value: 0.5
+minibatch_size:
+    value: 512
+norm_adv:
+    value: true
+num_envs:
+    value: 1024
+num_eval_envs:
+    value: 16
+num_eval_steps:
+    value: 64
+num_iterations:
+    value: 305
+num_minibatches:
+    value: 32
+num_steps:
+    value: 16
+partial_reset:
+    value: false
+reconfiguration_freq:
+    value: null
+render_mode:
+    value: all
+reward_scale:
+    value: 1
+save_model:
+    value: true
+save_train_video_freq:
+    value: null
+seed:
+    value: 3
+target_kl:
+    value: 0.2
+torch_deterministic:
+    value: true
+total_timesteps:
+    value: 5000000
+track:
+    value: true
+update_epochs:
+    value: 8
+vf_coef:
+    value: 0.5
+wandb_entity:
+    value: null
+wandb_group:
+    value: FPO
+wandb_project_name:
+    value: SO100-ManiSkill
