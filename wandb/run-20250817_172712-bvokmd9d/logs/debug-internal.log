@@ -1,8 +1,0 @@
-{"time":"2025-08-17T17:27:13.027332373+05:30","level":"INFO","msg":"stream: starting","core version":"0.21.1"}
-{"time":"2025-08-17T17:27:13.499626106+05:30","level":"INFO","msg":"stream: created new stream","id":"bvokmd9d"}
-{"time":"2025-08-17T17:27:13.499653915+05:30","level":"INFO","msg":"stream: started","id":"bvokmd9d"}
-{"time":"2025-08-17T17:27:13.499659123+05:30","level":"INFO","msg":"handler: started","stream_id":"bvokmd9d"}
-{"time":"2025-08-17T17:27:13.499682179+05:30","level":"INFO","msg":"writer: started","stream_id":"bvokmd9d"}
-{"time":"2025-08-17T17:27:13.499668966+05:30","level":"INFO","msg":"sender: started","stream_id":"bvokmd9d"}
-{"time":"2025-08-17T17:27:14.051705074+05:30","level":"ERROR","msg":"error generating diff","error":"no diff found"}
-{"time":"2025-08-17T17:27:14.075253633+05:30","level":"ERROR","msg":"error generating diff","error":"no diff found"}
