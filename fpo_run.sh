@@ -1,11 +1,36 @@
-#!/bin/bash
-seed=3
-python lerobot_sim2real/scripts/train_fpo_rgb.py --env-id="SO100GraspCube-v1" --env-kwargs-json-path=env_config.json \
-  --fpo.seed=${seed} \
-  --fpo.num_envs=1024 --fpo.num-steps=16 --fpo.update_epochs=8 --fpo.num_minibatches=32 \
-  --fpo.total_timesteps=5_000_000 --fpo.gamma=0.9 \
-  --fpo.num_eval_envs=16 --fpo.num-eval-steps=64 --fpo.no-partial-reset \
-  --fpo.cfm_loss_coef=1.0 \
-  --fpo.cfm_sample_taus=4 --fpo.fpo_ratio_clip_coef=0.2 \
-  --fpo.exp-name="fpo-SO100GraspCube-v1-rgb-${seed}" \
-  --fpo.track --fpo.wandb_project_name "SO100-ManiSkill" \
+#!/usr/bin/env bash
+set -euo pipefail
+
+SEED="${1:-3}"
+ENV_ID="${2:-SO100GraspCube-v1}"
+ENV_KWARGS_JSON="${3:-env_config.json}"
+
+RUN_NAME="fpo-${ENV_ID}-rgb-${SEED}"
+
+python lerobot_sim2real/scripts/train_fpo_rgb.py \
+  --env-id "${ENV_ID}" \
+  --env-kwargs-json-path "${ENV_KWARGS_JSON}" \
+  --fpo.seed "${SEED}" \
+  --fpo.exp-name "${RUN_NAME}" \
+  --fpo.track \
+  --fpo.wandb-project-name "SO100-ManiSkill" \
+  --fpo.num-envs 1024 \
+  --fpo.num-steps 32 \
+  --fpo.update-epochs 6 \
+  --fpo.num-minibatches 64 \
+  --fpo.total-timesteps 10000000 \
+  --fpo.gamma 0.99 \
+  --fpo.num-eval-envs 8 \
+  --fpo.num-eval-steps 100 \
+  --fpo.eval-freq 25 \
+  --fpo.no-partial-reset \
+  --fpo.learning-rate 3e-4 \
+  --fpo.vf-coef 0.7 \
+  --fpo.ent-coef 0.0 \
+  --fpo.clip-coef 0.1 \
+  --fpo.fpo-num-steps 8 \
+  --fpo.fpo-num-train-samples 32 \
+  --fpo.fpo-logratio-clip 0.7 \
+  --fpo.render-mode all \
+  --fpo.no-capture-video
+

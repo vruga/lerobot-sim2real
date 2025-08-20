@@ -1,60 +1,28 @@
-# lerobot_sim2real/rl/fpo_rgb.py
-"""
-CleanRL-style **Flow Policy Optimization (FPO)** for visual RL in ManiSkill.
-
-Core math (first principles):
-  Path:  z(τ) = (1 - τ) ε + τ a,  with ε ~ N(0, I), τ ~ schedule in [τ_min, τ_max]
-  True velocity along the path: ∂z/∂τ = a - ε
-
-Conditional Flow Matching (CFM) loss trains a velocity field v_θ(z, τ, s)
-to predict that true velocity:
-  L_cfm(s, a; θ) = E_{τ,ε} [ || v_θ(z(τ), τ, s) - (a - ε) ||^2 ]
-
-FPO surrogate ratio (ELBO proxy) replaces PPO's likelihood ratio:
-  r_FPO(θ) = exp(  L_cfm(s,a; θ_old) - L_cfm(s,a; θ)  )
-
-We plug r_FPO into the PPO-style clipped objective:
-  max_θ E[ min( r_FPO * A, clip(r_FPO, 1±ε) * A ) ]
-
-Key implementation details to avoid OOM and follow the paper:
-- The **policy is a flow**: actions are sampled by integrating z' = v_θ(z, τ, s) from τ=0→1.
-- During updates we snapshot θ_old once, and compute L_old & L_new **per minibatch**,
-  reusing the **same (τ, ε)** pairs for both θ_old and θ.
-- No Gaussian log-probs / entropy are used; stability comes from clipping r_FPO.
-"""
-
 from collections import defaultdict
+import json
 import os
 import random
 import time
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Tuple
-import copy
+from typing import Optional
 
 import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
+import tyro
 from torch.utils.tensorboard import SummaryWriter
 
 # ManiSkill specific imports
 import mani_skill.envs
 from mani_skill.utils import gym_utils
-from mani_skill.utils.wrappers.flatten import (
-    FlattenActionSpaceWrapper,
-    FlattenRGBDObservationWrapper,
-)
+from mani_skill.utils.wrappers.flatten import FlattenActionSpaceWrapper, FlattenRGBDObservationWrapper
 from mani_skill.utils.wrappers.record import RecordEpisode
 from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 
-
-# ==============================
-# Args
-# ==============================
 @dataclass
-class FPOArgs:
+class PPOArgs:
     exp_name: Optional[str] = None
     """the name of this experiment"""
     seed: int = 1
@@ -69,7 +37,7 @@ class FPOArgs:
     """the wandb's project name"""
     wandb_entity: Optional[str] = None
     """the entity (team) of wandb's project"""
-    wandb_group: str = "FPO"
+    wandb_group: str = "PPO"
     """the group of the run for wandb"""
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
@@ -82,14 +50,25 @@ class FPOArgs:
     render_mode: str = "all"
     """the environment rendering mode"""
 
-    # Algorithm specific arguments (mostly as in PPO backbone)
+    # === FPO (Diffusion Policy) additions ===
+    fpo_enable: bool = True                    # set False to fall back to PPO (if you keep code paths)
+    fpo_num_steps: int = 10                    # diffusion Euler steps
+    fpo_num_train_samples: int = 16            # CFM Monte-Carlo samples per transition
+    fpo_fixed_noise_inference: bool = False    # reproducible eval if True
+    fpo_logratio_clip: float = 3.0             # clamp for stability in exp(diff)
+    positive_advantage: bool = False           # optional softplus on advantages
+
+
+
+
+    # Algorithm specific arguments
     env_id: str = "PickCube-v1"
     """the id of the environment"""
     env_kwargs: dict = field(default_factory=dict)
     """extra environment kwargs to pass to the environment"""
     include_state: bool = True
     """whether to include state information in observations"""
-    total_timesteps: int = 10_000_000
+    total_timesteps: int = 10000000
     """total timesteps of the experiments"""
     learning_rate: float = 3e-4
     """the learning rate of the optimizer"""
@@ -108,7 +87,7 @@ class FPOArgs:
     reconfiguration_freq: Optional[int] = None
     """how often to reconfigure the environment during training"""
     eval_reconfiguration_freq: Optional[int] = 1
-    """for benchmarking purposes reconfigure eval env each reset to ensure randomization"""
+    """for benchmarking purposes we want to reconfigure the eval environment each reset to ensure objects are randomized in some tasks"""
     control_mode: Optional[str] = None
     """the control mode to use for the environment"""
     anneal_lr: bool = False
@@ -126,15 +105,15 @@ class FPOArgs:
     clip_coef: float = 0.2
     """the surrogate clipping coefficient"""
     clip_vloss: bool = False
-    """Toggles whether or not to use a clipped loss for the value function"""
+    """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
     ent_coef: float = 0.0
-    """entropy coeff (unused in pure FPO; keep 0.0)"""
+    """coefficient of the entropy"""
     vf_coef: float = 0.5
     """coefficient of the value function"""
     max_grad_norm: float = 0.5
     """the maximum norm for the gradient clipping"""
     target_kl: float = 0.2
-    """not used in pure FPO (no logπ); kept for interface compatibility"""
+    """the target KL divergence threshold"""
     reward_scale: float = 1.0
     """Scale the reward by this factor"""
     eval_freq: int = 25
@@ -143,18 +122,7 @@ class FPOArgs:
     """frequency to save training videos in terms of iterations"""
     finite_horizon_gae: bool = False
 
-    # FPO / CFM additions
-    cfm_noise_schedule: str = "linear"  # {"linear","cosine","sigmoid"}
-    cfm_tau_min: float = 0.01
-    cfm_tau_max: float = 0.99
-    cfm_sample_taus: int = 4           # N_mc
-    cfm_loss_coef: float = 0.0         # set to 0.0 for pure FPO (ELBO proxy already used)
-    fpo_ratio_clip_coef: Optional[float] = None   # None => no pre-exp clamp (actual FPO)
-
-    # Flow sampler (Euler steps for z' = vθ)
-    flow_num_steps: int = 10
-
-    # runtime
+    # to be filled in runtime
     batch_size: int = 0
     """the batch size (computed in runtime)"""
     minibatch_size: int = 0
@@ -162,12 +130,81 @@ class FPOArgs:
     num_iterations: int = 0
     """the number of iterations (computed in runtime)"""
 
-
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
+
+# new class diffusion network
+class DiffusionVelocityNet(nn.Module):
+    """
+    Predicts velocity given [features, x_t, t].
+    Input dim = latent_dim + action_dim + 1; Output dim = action_dim
+    """
+    def __init__(self, latent_dim: int, action_dim: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            layer_init(nn.Linear(latent_dim + action_dim + 1, 512)),
+            nn.ReLU(inplace=True),
+            layer_init(nn.Linear(512, action_dim), std=np.sqrt(2)),
+        )
+
+    def forward(self, features: torch.Tensor, x_t: torch.Tensor, t: torch.Tensor):
+        return self.net(torch.cat([features, x_t, t], dim=1))
+
+
+class DiffusionPolicyHead(nn.Module):
+    """
+    Euler diffusion + CFM loss helper. Conditions on visual features.
+    """
+    def __init__(self, latent_dim: int, action_dim: int, num_steps: int = 10, fixed_noise_inference: bool = False):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.action_dim = action_dim
+        self.num_steps = num_steps
+        self.fixed_noise_inference = fixed_noise_inference
+        self.velocity = DiffusionVelocityNet(latent_dim, action_dim)
+        self.register_buffer("init_noise", torch.randn(1, action_dim))
+
+    @torch.no_grad()
+    def sample_action_with_info(self, features: torch.Tensor, num_train_samples: int = 16):
+        device = features.device
+        B, A = features.size(0), self.action_dim
+        dt = 1.0 / self.num_steps
+
+        # inference noise
+        if self.fixed_noise_inference:
+            eps0 = self.init_noise.expand(B, -1).contiguous()
+        else:
+            eps0 = torch.randn(B, A, device=device)
+
+        x_t = eps0.clone()
+        for step in range(self.num_steps):
+            t_val = step * dt
+            t = torch.full((B, 1), t_val, device=device)
+            v = self.velocity(features, x_t, t)
+            x_t = x_t + dt * v
+
+        x1 = x_t  # final action
+
+        # MC samples for CFM baseline
+        eps = torch.randn(B, num_train_samples, A, device=device)    # [B, N, A]
+        t_s = torch.rand(B, num_train_samples, 1, device=device)     # [B, N, 1]
+
+        init_loss = self.compute_cfm_loss(
+            features.unsqueeze(1).expand(-1, num_train_samples, -1).reshape(-1, features.size(1)),
+            x1.unsqueeze(1).expand(-1, num_train_samples, -1).reshape(-1, A),
+            eps.reshape(-1, A),
+            t_s.reshape(-1, 1),
+        ).view(B, num_train_samples)                                  # [B, N]
+
+        return x1, eps, t_s, init_loss
+
+    def compute_cfm_loss(self, features: torch.Tensor, x1: torch.Tensor, eps: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        x_t = (1.0 - t) * eps + t * x1          # [B, A]
+        v_pred = self.velocity(features, x_t, t)
+        return torch.nn.functional.mse_loss(v_pred, x1 - eps, reduction="none").mean(dim=1)  # [B]
 
 class DictArray(object):
     def __init__(self, buffer_shape, element_space, data_dict=None, device=None):
@@ -181,20 +218,12 @@ class DictArray(object):
                 if isinstance(v, gym.spaces.dict.Dict):
                     self.data[k] = DictArray(buffer_shape, v, device=device)
                 else:
-                    dtype = (
-                        torch.float32
-                        if v.dtype in (np.float32, np.float64)
-                        else torch.uint8
-                        if v.dtype == np.uint8
-                        else torch.int16
-                        if v.dtype == np.int16
-                        else torch.int32
-                        if v.dtype == np.int32
-                        else v.dtype
-                    )
-                    self.data[k] = torch.zeros(
-                        buffer_shape + v.shape, dtype=dtype, device=device
-                    )
+                    dtype = (torch.float32 if v.dtype in (np.float32, np.float64) else
+                            torch.uint8 if v.dtype == np.uint8 else
+                            torch.int16 if v.dtype == np.int16 else
+                            torch.int32 if v.dtype == np.int32 else
+                            v.dtype)
+                    self.data[k] = torch.zeros(buffer_shape + v.shape, dtype=dtype, device=device)
 
     def keys(self):
         return self.data.keys()
@@ -202,7 +231,9 @@ class DictArray(object):
     def __getitem__(self, index):
         if isinstance(index, str):
             return self.data[index]
-        return {k: v[index] for k, v in self.data.items()}
+        return {
+            k: v[index] for k, v in self.data.items()
+        }
 
     def __setitem__(self, index, value):
         if isinstance(index, str):
@@ -217,22 +248,13 @@ class DictArray(object):
     def reshape(self, shape):
         t = len(self.buffer_shape)
         new_dict = {}
-        for k, v in self.data.items():
+        for k,v in self.data.items():
             if isinstance(v, DictArray):
                 new_dict[k] = v.reshape(shape)
             else:
                 new_dict[k] = v.reshape(shape + v.shape[t:])
-        new_buffer_shape = next(iter(new_dict.values())).shape[: len(shape)]
+        new_buffer_shape = next(iter(new_dict.values())).shape[:len(shape)]
         return DictArray(new_buffer_shape, None, data_dict=new_dict)
-
-
-# Helper: accept DictArray or dict transparently
-def _as_tensor_dict(obs_like):
-    """Convert a DictArray to a plain dict of tensors (full slice)."""
-    if isinstance(obs_like, DictArray):
-        return obs_like[:]
-    return obs_like
-
 
 class NatureCNN(nn.Module):
     def __init__(self, sample_obs):
@@ -242,181 +264,189 @@ class NatureCNN(nn.Module):
 
         self.out_features = 0
         feature_size = 256
-        in_channels = sample_obs["rgb"].shape[-1]
+        in_channels=sample_obs["rgb"].shape[-1]
+        image_size=(sample_obs["rgb"].shape[1], sample_obs["rgb"].shape[2])
 
-        # NatureCNN
+
+        # here we use a NatureCNN architecture to process images, but any architecture is permissble here
         cnn = nn.Sequential(
-            nn.Conv2d(in_channels=in_channels, out_channels=32, kernel_size=8, stride=4, padding=0),
+            nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=32,
+                kernel_size=8,
+                stride=4,
+                padding=0,
+            ),
             nn.ReLU(),
-            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2, padding=0),
+            nn.Conv2d(
+                in_channels=32, out_channels=64, kernel_size=4, stride=2, padding=0
+            ),
             nn.ReLU(),
-            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=0),
+            nn.Conv2d(
+                in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=0
+            ),
             nn.ReLU(),
             nn.Flatten(),
         )
+
+        # to easily figure out the dimensions after flattening, we pass a test tensor
         with torch.no_grad():
-            n_flatten = cnn(sample_obs["rgb"].float().permute(0, 3, 1, 2).cpu()).shape[1]
+            n_flatten = cnn(sample_obs["rgb"].float().permute(0,3,1,2).cpu()).shape[1]
             fc = nn.Sequential(nn.Linear(n_flatten, feature_size), nn.ReLU())
         extractors["rgb"] = nn.Sequential(cnn, fc)
         self.out_features += feature_size
 
         if "state" in sample_obs:
+            # for state data we simply pass it through a single linear layer
             state_size = sample_obs["state"].shape[-1]
-            extractors["state"] = nn.Linear(state_size, 256)  # keep identical to PPO
+            extractors["state"] = nn.Linear(state_size, 256)
             self.out_features += 256
 
         self.extractors = nn.ModuleDict(extractors)
 
     def forward(self, observations) -> torch.Tensor:
         encoded_tensor_list = []
+        # self.extractors contain nn.Modules that do all the processing.
         for key, extractor in self.extractors.items():
             obs = observations[key]
             if key == "rgb":
-                obs = obs.float().permute(0, 3, 1, 2)
+                obs = obs.float().permute(0,3,1,2)
                 obs = obs / 255
             encoded_tensor_list.append(extractor(obs))
         return torch.cat(encoded_tensor_list, dim=1)
 
-
+#old class
+'''
 class Agent(nn.Module):
-    def __init__(self, envs, sample_obs, args: FPOArgs):
+    def __init__(self, envs, sample_obs):
+        super().__init__()
+        self.feature_net = NatureCNN(sample_obs=sample_obs)
+        # latent_size = np.array(envs.unwrapped.single_observation_space.shape).prod()
+        latent_size = self.feature_net.out_features
+        self.critic = nn.Sequential(
+            layer_init(nn.Linear(latent_size, 512)),
+            nn.ReLU(inplace=True),
+            layer_init(nn.Linear(512, 1)),
+        )
+        self.actor_mean = nn.Sequential(
+            layer_init(nn.Linear(latent_size, 512)),
+            nn.ReLU(inplace=True),
+            layer_init(nn.Linear(512, np.prod(envs.unwrapped.single_action_space.shape)), std=0.01*np.sqrt(2)),
+        )
+        self.actor_logstd = nn.Parameter(torch.ones(1, np.prod(envs.unwrapped.single_action_space.shape)) * -0.5)
+    def get_features(self, x):
+        return self.feature_net(x)
+    def get_value(self, x):
+        x = self.feature_net(x)
+        return self.critic(x)
+    def get_action(self, x, deterministic=False):
+        x = self.feature_net(x)
+        action_mean = self.actor_mean(x)
+        if deterministic:
+            return action_mean
+        action_logstd = self.actor_logstd.expand_as(action_mean)
+        action_std = torch.exp(action_logstd)
+        probs = Normal(action_mean, action_std)
+        return probs.sample()
+    def get_action_and_value(self, x, action=None):
+        x = self.feature_net(x)
+        action_mean = self.actor_mean(x)
+        action_logstd = self.actor_logstd.expand_as(action_mean)
+        action_std = torch.exp(action_logstd)
+        probs = Normal(action_mean, action_std)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+'''
+
+#new class agent fpo
+class Agent(nn.Module):
+    def __init__(self, envs, sample_obs, args: PPOArgs = None):
         super().__init__()
         self.args = args
         self.feature_net = NatureCNN(sample_obs=sample_obs)
         latent_size = self.feature_net.out_features
 
-        # Critic
+        # Critic unchanged
         self.critic = nn.Sequential(
             layer_init(nn.Linear(latent_size, 512)),
             nn.ReLU(inplace=True),
             layer_init(nn.Linear(512, 1)),
         )
 
-        # Flow velocity head v_θ(z, τ, s) — takes [feat, τ, z]
-        act_dim = int(np.prod(envs.unwrapped.single_action_space.shape))
-        self.act_dim = act_dim
-        self.vel_head = nn.Sequential(
-            layer_init(nn.Linear(latent_size + 1 + act_dim, 512)),
-            nn.ReLU(inplace=True),
-            layer_init(nn.Linear(512, act_dim), std=0.1),
+        # Diffusion actor
+        action_dim = int(np.prod(envs.unwrapped.single_action_space.shape))
+        self.action_low = torch.as_tensor(envs.unwrapped.single_action_space.low, dtype=torch.float32)
+        self.action_high = torch.as_tensor(envs.unwrapped.single_action_space.high, dtype=torch.float32)
+
+        n_steps = (args.fpo_num_steps if args is not None else 10)
+        fixed = (args.fpo_fixed_noise_inference if args is not None else False)
+        self.actor_dp = DiffusionPolicyHead(
+            latent_dim=latent_size,
+            action_dim=action_dim,
+            num_steps=n_steps,
+            fixed_noise_inference=fixed,
         )
 
-    # ------- Flow & CFM utilities -------
-
-    def get_features(self, x: Dict[str, torch.Tensor]):
-        x = _as_tensor_dict(x)
+    # ---- shared utils ----
+    def get_features(self, x):
         return self.feature_net(x)
 
     def get_value(self, x):
         x = self.feature_net(x)
         return self.critic(x)
 
-    def _sample_tau(self, b: int, device: torch.device):
-        s = self.args.cfm_noise_schedule
-        tmin, tmax = self.args.cfm_tau_min, self.args.cfm_tau_max
-        u = torch.rand(b, device=device)
-        if s == "linear":
-            return tmin + (tmax - tmin) * u
-        if s == "cosine":
-            return tmin + 0.5 * (tmax - tmin) * (1 - torch.cos(u * np.pi))
-        if s == "sigmoid":
-            return tmin + (tmax - tmin) * torch.sigmoid(2 * (u - 0.5))
-        return tmin + (tmax - tmin) * u
+    def _clip_to_action_space(self, a: torch.Tensor) -> torch.Tensor:
+        low = self.action_low.to(a.device)
+        high = self.action_high.to(a.device)
+        return torch.max(torch.min(a, high), low)
+
+    # ---- PPO-compatible API (dummy logprob/entropy) ----
+    @torch.no_grad()
+    def get_action(self, x, deterministic=False):
+        feats = self.feature_net(x)
+        a, _, _, _ = self.actor_dp.sample_action_with_info(feats, num_train_samples=1)
+        a = self._clip_to_action_space(a)
+        return a  # determinism controlled by fpo_fixed_noise_inference
 
     @torch.no_grad()
-    def _flow_sample(self, feat: torch.Tensor, deterministic: bool) -> torch.Tensor:
-        """
-        Integrate z' = vθ(z, τ, s) from τ=0→1 with simple Euler steps.
-        Start at ε (noise) if stochastic; at 0 if deterministic (ε=0).
-        """
-        B, A = feat.size(0), self.act_dim
-        z = torch.zeros(B, A, device=feat.device)
-        if not deterministic:
-            z.normal_()  # ε ~ N(0, I)
+    def get_action_and_value(self, x, action=None):
+        feats = self.feature_net(x)
+        a, _, _, _ = self.actor_dp.sample_action_with_info(feats, num_train_samples=1)
+        a = self._clip_to_action_space(a)
+        v = self.critic(feats)
+        dummy_logprob = torch.zeros(a.size(0), device=a.device)
+        dummy_entropy = torch.zeros_like(dummy_logprob)
+        if action is None:
+            action = a
+        return action, dummy_logprob, dummy_entropy, v
 
-        K = max(1, self.args.flow_num_steps)
-        dt = 1.0 / K
-        for k in range(K):
-            tau = (k + 0.5) * dt  # midpoint Euler
-            tau_tensor = torch.full((B, 1), tau, device=feat.device, dtype=feat.dtype)
-            x = torch.cat([feat, tau_tensor, z], dim=-1)
-            v = self.vel_head(x)
-            z = z + dt * v
-        return z  # action at τ=1
+    @torch.no_grad()
+    def fpo_action_value_and_info(self, x):
+        feats = self.feature_net(x)  # [B, L]
+        a, eps, t_s, init_loss = self.actor_dp.sample_action_with_info(
+            feats, num_train_samples=(self.args.fpo_num_train_samples if self.args else 16)
+        )
+        a = self._clip_to_action_space(a)
+        v = self.critic(feats)
+        return a, v, feats, eps, t_s, init_loss
 
-    def get_action(self, obs, deterministic=False):
-        feat = self.get_features(obs)
-        a = self._flow_sample(feat, deterministic=deterministic)
-        return a
-
-    def get_action_and_value(self, obs):
-        # For rollouts: sample action (stochastic) and compute value
-        with torch.no_grad():
-            feat = self.get_features(obs)
-            a = self._flow_sample(feat, deterministic=False)
-            v = self.critic(feat).view(-1)
-        return a, v
-
-    def cfm_loss_from_feat_pairs(
-        self,
-        feat: torch.Tensor,             # [B, D]  precomputed features
-        actions: torch.Tensor,          # [B, A]
-        taus: torch.Tensor,             # [B, M]
-        eps: torch.Tensor,              # [B, M, A]
-        chunk_size: int = 2048,
-    ) -> torch.Tensor:
-        """
-        Per-sample Monte Carlo estimate of L_cfm(s, a; θ) given explicit (τ, ε) pairs.
-        Uses precomputed features (no CNN inside) and chunks for OOM safety.
-        Returns tensor [B] with per-item losses averaged over M.
-        """
-        device = actions.device
-        B, A = actions.shape
-        M = taus.shape[1]
-        out = torch.empty(B, device=device, dtype=feat.dtype)
-
-        for i0 in range(0, B, chunk_size):
-            i1 = min(i0 + chunk_size, B)
-            b = i1 - i0
-
-            feat_b = feat[i0:i1]                        # [b, D]
-            act_b  = actions[i0:i1]                     # [b, A]
-            tau_b  = taus[i0:i1]                        # [b, M]
-            eps_b  = eps[i0:i1]                         # [b, M, A]
-
-            # z(τ) = (1 - τ) ε + τ a  (α_τ = τ, σ_τ = 1 - τ)
-            z = (1 - tau_b.unsqueeze(-1)) * eps_b + tau_b.unsqueeze(-1) * act_b.unsqueeze(1)  # [b, M, A]
-            target = act_b.unsqueeze(1) - eps_b                                             # [b, M, A]
-
-            # expand for M
-            feat_rep = feat_b.unsqueeze(1).expand(-1, M, -1).reshape(b * M, -1)             # [b*M, D]
-            tau_rep  = tau_b.reshape(b * M, 1)                                              # [b*M, 1]
-            z_rep    = z.reshape(b * M, A)                                                  # [b*M, A]
-            x = torch.cat([feat_rep, tau_rep, z_rep], dim=-1)                               # [b*M, D+1+A]
-            v_pred = self.vel_head(x).reshape(b, M, A)                                      # [b, M, A]
-
-            per = F.mse_loss(v_pred, target, reduction="none").mean(dim=-1)                 # [b, M]
-            out[i0:i1] = per.mean(dim=1)                                                    # [b]
-
-        return out
-
+    def compute_cfm_loss(self, features, x1, eps, t):
+        return self.actor_dp.compute_cfm_loss(features, x1, eps, t)
 
 class Logger:
     def __init__(self, log_wandb=False, tensorboard: SummaryWriter = None) -> None:
         self.writer = tensorboard
         self.log_wandb = log_wandb
-
     def add_scalar(self, tag, scalar_value, step):
         if self.log_wandb:
             import wandb
             wandb.log({tag: scalar_value}, step=step)
         self.writer.add_scalar(tag, scalar_value, step)
-
     def close(self):
         self.writer.close()
 
-
-def train(args: FPOArgs):
+def train(args: PPOArgs):
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
@@ -426,7 +456,7 @@ def train(args: FPOArgs):
     else:
         run_name = args.exp_name
 
-    # Seeding
+    # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -434,7 +464,7 @@ def train(args: FPOArgs):
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    # Env setup (same as PPO backbone)
+    # env setup
     env_kwargs = dict(
         obs_mode="rgb+segmentation", render_mode=args.render_mode, sim_backend="physx_cuda",
     )
@@ -445,6 +475,7 @@ def train(args: FPOArgs):
     eval_envs = gym.make(args.env_id, num_envs=args.num_eval_envs, reconfiguration_freq=args.eval_reconfiguration_freq, **env_kwargs)
     envs = gym.make(args.env_id, num_envs=args.num_envs if not args.evaluate else 1, reconfiguration_freq=args.reconfiguration_freq, **env_kwargs)
 
+    # rgbd obs mode returns a dict of data, we flatten it so there is just a rgbd key and state key
     envs = FlattenRGBDObservationWrapper(envs, rgb=True, depth=False, state=args.include_state)
     eval_envs = FlattenRGBDObservationWrapper(eval_envs, rgb=True, depth=False, state=args.include_state)
 
@@ -457,24 +488,9 @@ def train(args: FPOArgs):
             eval_output_dir = f"{os.path.dirname(args.checkpoint)}/test_videos"
         print(f"Saving eval videos to {eval_output_dir}")
         if args.save_train_video_freq is not None:
-            save_video_trigger = lambda x: (x // args.num_steps) % args.save_train_video_freq == 0
-            envs = RecordEpisode(
-                envs,
-                output_dir=f"runs/{run_name}/train_videos",
-                save_trajectory=False,
-                save_video_trigger=save_video_trigger,
-                max_steps_per_video=args.num_steps,
-                video_fps=eval_envs.unwrapped.control_freq,
-            )
-        eval_envs = RecordEpisode(
-            eval_envs,
-            output_dir=eval_output_dir,
-            save_trajectory=args.evaluate,
-            trajectory_name="trajectory",
-            max_steps_per_video=args.num_eval_steps,
-            video_fps=eval_envs.unwrapped.control_freq,
-            info_on_video=True,
-        )
+            save_video_trigger = lambda x : (x // args.num_steps) % args.save_train_video_freq == 0
+            envs = RecordEpisode(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=eval_envs.unwrapped.control_freq)
+        eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.evaluate, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=eval_envs.unwrapped.control_freq, info_on_video=True)
     envs = ManiSkillVectorEnv(envs, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=True)
     eval_envs = ManiSkillVectorEnv(eval_envs, args.num_eval_envs, ignore_terminations=not args.eval_partial_reset, record_metrics=True)
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
@@ -482,12 +498,12 @@ def train(args: FPOArgs):
     max_episode_steps = gym_utils.find_max_episode_steps_value(envs._env)
     logger = None
     if not args.evaluate:
-        print("Running FPO training")
+        print("Running training")
         if args.track:
             import wandb
             config = vars(args)
             config["env_cfg"] = dict(**env_kwargs, num_envs=args.num_envs, env_id=args.env_id, reward_mode="normalized_dense", env_horizon=max_episode_steps, partial_reset=args.partial_reset)
-            config["eval_env_cfg"] = dict(**env_kwargs, num_envs=args.num_eval_envs, env_id=args.env_id, reward_mode="normalized_dense", env_horizon=max_episode_steps, partial_reset=args.eval_partial_reset)
+            config["eval_env_cfg"] = dict(**env_kwargs, num_envs=args.num_eval_envs, env_id=args.env_id, reward_mode="normalized_dense", env_horizon=max_episode_steps, partial_reset=args.partial_reset)
             wandb.init(
                 project=args.wandb_project_name,
                 entity=args.wandb_entity,
@@ -496,7 +512,7 @@ def train(args: FPOArgs):
                 name=run_name,
                 save_code=True,
                 group=args.wandb_group,
-                tags=["fpo"],
+                tags=["ppo", "walltime_efficient"]
             )
         writer = SummaryWriter(f"runs/{run_name}")
         writer.add_text(
@@ -507,33 +523,40 @@ def train(args: FPOArgs):
     else:
         print("Running evaluation")
 
-    # Storage (PPO-style buffers + FPO pairs)
+    # ALGO Logic: Storage setup
     obs = DictArray((args.num_steps, args.num_envs), envs.single_observation_space, device=device)
-    actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape, device=device)
-    rewards = torch.zeros((args.num_steps, args.num_envs), device=device)
-    dones = torch.zeros((args.num_steps, args.num_envs), device=device)
-    values = torch.zeros((args.num_steps, args.num_envs), device=device)
+    actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
+    logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
+    rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
+    dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
+    values = torch.zeros((args.num_steps, args.num_envs)).to(device)
+    #new ===fpo storage ===
+    # === FPO storages ===
+    N = args.fpo_num_train_samples
+    A = int(np.prod(envs.single_action_space.shape))
+    fpo_eps = None     # [T, B, N, A]
+    fpo_t = None       # [T, B, N, 1]
+    fpo_init = None    # [T, B, N]
 
-    # FPO: store (τ, ε) for each (t, env) with N_mc samples
-    act_dim = int(np.prod(envs.single_action_space.shape))
-    cfm_taus = torch.zeros((args.num_steps, args.num_envs, args.cfm_sample_taus), device=device)
-    cfm_eps  = torch.zeros((args.num_steps, args.num_envs, args.cfm_sample_taus, act_dim), device=device)
-
-    # Start
+    # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
     next_obs, _ = envs.reset(seed=args.seed)
     eval_obs, _ = eval_envs.reset(seed=args.seed)
     next_done = torch.zeros(args.num_envs, device=device)
-    print("####")
+    print(f"####")
     print(f"args.num_iterations={args.num_iterations} args.num_envs={args.num_envs} args.num_eval_envs={args.num_eval_envs}")
     print(f"args.minibatch_size={args.minibatch_size} args.batch_size={args.batch_size} args.update_epochs={args.update_epochs}")
-    print("####")
+    print(f"####")
+    #old agent
+   # agent = Agent(envs, sample_obs=next_obs).to(device)
+    #fpo agent
     agent = Agent(envs, sample_obs=next_obs, args=args).to(device)
+
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     if args.checkpoint:
-        agent.load_state_dict(torch.load(args.checkpoint, map_location=device))
+        agent.load_state_dict(torch.load(args.checkpoint))
 
     cumulative_times = defaultdict(float)
 
@@ -541,7 +564,6 @@ def train(args: FPOArgs):
         print(f"Epoch: {iteration}, global_step={global_step}")
         final_values = torch.zeros((args.num_steps, args.num_envs), device=device)
         agent.eval()
-
         if iteration % args.eval_freq == 1:
             print("Evaluating")
             stime = time.perf_counter()
@@ -550,9 +572,7 @@ def train(args: FPOArgs):
             num_episodes = 0
             for _ in range(args.num_eval_steps):
                 with torch.no_grad():
-                    eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(
-                        agent.get_action(eval_obs, deterministic=True)
-                    )
+                    eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(agent.get_action(eval_obs, deterministic=True))
                     if "final_info" in eval_infos:
                         mask = eval_infos["_final_info"]
                         num_episodes += mask.sum()
@@ -574,38 +594,41 @@ def train(args: FPOArgs):
             model_path = f"runs/{run_name}/ckpt_{iteration}.pt"
             torch.save(agent.state_dict(), model_path)
             print(f"model saved to {model_path}")
-
-        # Anneal LR
+        # Annealing the rate if instructed to do so.
         if args.anneal_lr:
             frac = 1.0 - (iteration - 1.0) / args.num_iterations
-            optimizer.param_groups[0]["lr"] = frac * args.learning_rate
-
+            lrnow = frac * args.learning_rate
+            optimizer.param_groups[0]["lr"] = lrnow
         rollout_time = time.perf_counter()
         for step in range(0, args.num_steps):
             global_step += args.num_envs
             obs[step] = next_obs
             dones[step] = next_done
 
-            with torch.no_grad():
-                action, value = agent.get_action_and_value(next_obs)
-                values[step] = value
-            actions[step] = action
 
-            # env step
+            with torch.no_grad():
+                action, value, feats, eps_s, t_s, init_loss = None, None, None, None, None, None
+                action, value, feats, eps_s, t_s, init_loss = agent.fpo_action_value_and_info(next_obs)
+                values[step] = value.view(-1)
+
+            actions[step] = action
+            logprobs[step] = torch.zeros(args.num_envs, device=device)
+
+
+            # lazy-allocate FPO buffers once we know sizes
+            if fpo_eps is None:
+                fpo_eps  = torch.zeros(args.num_steps, args.num_envs, N, A, device=device)
+                fpo_t    = torch.zeros(args.num_steps, args.num_envs, N, 1, device=device)
+                fpo_init = torch.zeros(args.num_steps, args.num_envs, N, device=device)
+
+            fpo_eps[step] = eps_s
+            fpo_t[step] = t_s
+            fpo_init[step] = init_loss
+
+            # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, reward, terminations, truncations, infos = envs.step(action)
             next_done = torch.logical_or(terminations, truncations).to(torch.float32)
             rewards[step] = reward.view(-1) * args.reward_scale
-
-            # store MC (τ, ε) pairs ONCE per (t, env)
-            taus = agent._sample_tau(args.num_envs * args.cfm_sample_taus, device=device).view(
-                args.num_envs, args.cfm_sample_taus
-            )
-            eps  = torch.randn(args.num_envs, args.cfm_sample_taus, act_dim, device=device)
-            cfm_taus[step] = taus
-            cfm_eps[step]  = eps
-
-            if step % 10 == 0:
-                print(f"Step {global_step}: Action norm: {action.norm().item():.2f}, Reward mean: {reward.mean().item():.3f}")
 
             if "final_info" in infos:
                 final_info = infos["final_info"]
@@ -616,13 +639,10 @@ def train(args: FPOArgs):
                 for k in infos["final_observation"]:
                     infos["final_observation"][k] = infos["final_observation"][k][done_mask]
                 with torch.no_grad():
-                    final_values[step, torch.arange(args.num_envs, device=device)[done_mask]] = agent.get_value(
-                        infos["final_observation"]
-                    ).view(-1)
+                    final_values[step, torch.arange(args.num_envs, device=device)[done_mask]] = agent.get_value(infos["final_observation"]).view(-1)
         rollout_time = time.perf_counter() - rollout_time
         cumulative_times["rollout_time"] += rollout_time
-
-        # GAE / returns
+        # bootstrap value according to termination and truncation
         with torch.no_grad():
             next_value = agent.get_value(next_obs).reshape(1, -1)
             advantages = torch.zeros_like(rewards).to(device)
@@ -634,12 +654,23 @@ def train(args: FPOArgs):
                 else:
                     next_not_done = 1.0 - dones[t + 1]
                     nextvalues = values[t + 1]
-                real_next_values = next_not_done * nextvalues + final_values[t]
+                real_next_values = next_not_done * nextvalues + final_values[t] # t instead of t+1
+                # next_not_done means nextvalues is computed from the correct next_obs
+                # if next_not_done is 1, final_values is always 0
+                # if next_not_done is 0, then use final_values, which is computed according to bootstrap_at_done
                 if args.finite_horizon_gae:
-                    if t == args.num_steps - 1:
-                        lam_coef_sum = 0.0
-                        reward_term_sum = 0.0
-                        value_term_sum = 0.0
+                    """
+                    See GAE paper equation(16) line 1, we will compute the GAE based on this line only
+                    1             *(  -V(s_t)  + r_t                                                               + gamma * V(s_{t+1})   )
+                    lambda        *(  -V(s_t)  + r_t + gamma * r_{t+1}                                             + gamma^2 * V(s_{t+2}) )
+                    lambda^2      *(  -V(s_t)  + r_t + gamma * r_{t+1} + gamma^2 * r_{t+2}                         + ...                  )
+                    lambda^3      *(  -V(s_t)  + r_t + gamma * r_{t+1} + gamma^2 * r_{t+2} + gamma^3 * r_{t+3}
+                    We then normalize it by the sum of the lambda^i (instead of 1-lambda)
+                    """
+                    if t == args.num_steps - 1: # initialize
+                        lam_coef_sum = 0.
+                        reward_term_sum = 0. # the sum of the second term
+                        value_term_sum = 0. # the sum of the third term
                     lam_coef_sum = lam_coef_sum * next_not_done
                     reward_term_sum = reward_term_sum * next_not_done
                     value_term_sum = value_term_sum * next_not_done
@@ -651,77 +682,126 @@ def train(args: FPOArgs):
                     advantages[t] = (reward_term_sum + value_term_sum) / lam_coef_sum - values[t]
                 else:
                     delta = rewards[t] + args.gamma * real_next_values - values[t]
-                    advantages[t] = lastgaelam = (
-                        delta + args.gamma * args.gae_lambda * next_not_done * lastgaelam
-                    )
+                    advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * next_not_done * lastgaelam # Here actually we should use next_not_terminated, but we don't have lastgamlam if terminated
             returns = advantages + values
 
-        # Flatten batch
+        # flatten the batch
         b_obs = obs.reshape((-1,))
+        b_logprobs = logprobs.reshape(-1)
         b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
         b_advantages = advantages.reshape(-1)
         b_returns = returns.reshape(-1)
         b_values = values.reshape(-1)
+        # FPO flatten
+        b_eps   = fpo_eps.reshape(args.batch_size, N, A)     # [B, N, A]
+        b_t     = fpo_t.reshape(args.batch_size, N, 1)       # [B, N, 1]
+        b_init  = fpo_init.reshape(args.batch_size, N)       # [B, N]
 
-        # Flatten stored MC pairs
-        B = args.batch_size
-        M = args.cfm_sample_taus
-        A = b_actions.shape[-1]
-        b_taus = cfm_taus.reshape(B, M)
-        b_eps  = cfm_eps.reshape(B, M, A)
 
-        # Optimize — FPO: r = exp(L_old - L_new), with same (τ, ε)
+        # Optimizing the policy and value network
         agent.train()
-        b_inds = np.arange(B)
+        b_inds = np.arange(args.batch_size)
         clipfracs = []
-        r_fpo_means = []
         update_time = time.perf_counter()
-
-        # Snapshot θ_old ONCE per update
-        agent_old = copy.deepcopy(agent).to(device).eval()
-        for p in agent_old.parameters():
-            p.requires_grad_(False)
+        last_entropy_loss = 0.0
+        last_old_approx_kl = 0.0
+        last_approx_kl = 0.0
 
         for epoch in range(args.update_epochs):
             np.random.shuffle(b_inds)
-            for start in range(0, B, args.minibatch_size):
+            for start in range(0, args.batch_size, args.minibatch_size):
                 end = start + args.minibatch_size
-                mb_inds = b_inds[start:end]
+                mb = b_inds[start:end]
+                if len(mb) == 0: continue
 
-                obs_mb = b_obs[mb_inds]
-                act_mb = b_actions[mb_inds]
-                taus_mb = b_taus[mb_inds]
-                eps_mb  = b_eps[mb_inds]
+                feats = agent.get_features(b_obs[mb])                     # [B, L]
+                newvalue = agent.critic(feats).view(-1)                   # [B]
+                x1 = b_actions[mb].view(feats.size(0), -1)                # [B, A]
 
-                # features
-                with torch.no_grad():
-                    feat_old = agent_old.get_features(obs_mb)
-                feat_new = agent.get_features(obs_mb)
+                # Gather MC tensors for this minibatch
+                eps_mb  = b_eps[mb]         # [B, N, A]
+                t_mb    = b_t[mb]           # [B, N, 1]
+                init_mb = b_init[mb]        # [B, N]
 
-                # L_old & L_new with SAME (τ, ε)
-                with torch.no_grad():
-                    L_old = agent_old.cfm_loss_from_feat_pairs(feat_old, act_mb, taus_mb, eps_mb)
-                L_new = agent.cfm_loss_from_feat_pairs(feat_new, act_mb, taus_mb, eps_mb)
+                B = feats.size(0)
+                BN = B * N
+                L = feats.size(1)
+                A_ = x1.size(1)
 
-                # r_FPO = exp(L_old - L_new)  (optional pre-exp clamp if args.fpo_ratio_clip_coef not None)
-                if args.fpo_ratio_clip_coef is None:
-                    r_fpo = torch.exp(L_old - L_new)
-                else:
-                    r_fpo = torch.exp((L_old - L_new).clamp(-args.fpo_ratio_clip_coef, args.fpo_ratio_clip_coef))
-                r_fpo_means.append(r_fpo.mean().item())
+                # Expand to BN then compute CFM loss
+                feats_bn = feats.unsqueeze(1).expand(B, N, L).reshape(BN, L)
+                x1_bn    = x1.unsqueeze(1).expand(B, N, A_).reshape(BN, A_)
+                eps_bn   = eps_mb.reshape(BN, A_)
+                t_bn     = t_mb.reshape(BN, 1)
 
-                # advantages
-                mb_adv = b_advantages[mb_inds]
+                cfm_new = agent.compute_cfm_loss(feats_bn, x1_bn, eps_bn, t_bn).view(B, N)
+                diff = init_mb - cfm_new
+                diff = torch.clamp(diff, -args.fpo_logratio_clip, args.fpo_logratio_clip)
+                rho = torch.exp(diff.mean(dim=1))                          # [B]
+                clip_rho = torch.clamp(rho, 1.0 - args.clip_coef, 1.0 + args.clip_coef)
+                # wjhat thje fuck is thjis
+                clipfracs += [((rho - 1.0).abs() > args.clip_coef).float().mean().item()]
+
+                # Advantages
+                mb_advantages = b_advantages[mb]
                 if args.norm_adv:
-                    mb_adv = (mb_adv - mb_adv.mean()) / (mb_adv.std() + 1e-8)
+                    mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+                if args.positive_advantage:
+                    mb_advantages = torch.nn.functional.softplus(mb_advantages)
 
-                # PPO-style clipped surrogate but with r_fpo
-                pg_loss1 = -mb_adv * r_fpo
-                pg_loss2 = -mb_adv * torch.clamp(r_fpo, 1 - args.clip_coef, 1 + args.clip_coef)
+                # Policy loss (rho replaces likelihood ratio)
+                pg_loss1 = -mb_advantages * rho
+                pg_loss2 = -mb_advantages * clip_rho
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
-                # Value loss (reuse feat_new to avoid extra CNN)
-                newvalue = agent.critic(feat_new).view(-1)
+                # Value loss (unchanged)
+                if args.clip_vloss:
+                    v_loss_unclipped = (newvalue - b_returns[mb]) ** 2
+                    v_clipped = b_values[mb] + torch.clamp(newvalue - b_values[mb], -args.clip_coef, args.clip_coef)
+                    v_loss = 0.5 * torch.max(v_loss_unclipped, (v_clipped - b_returns[mb]) ** 2).mean()
+                else:
+                    v_loss = 0.5 * ((newvalue - b_returns[mb]) ** 2).mean()
+
+                # No meaningful entropy/approx_kl in this path
+                entropy_loss = torch.tensor(0.0, device=device)
+                approx_kl = torch.tensor(0.0, device=device)
+                old_approx_kl = torch.tensor(0.0, device=device)
+
+
+                # after optimizer.step():
+                last_entropy_loss = float(entropy_loss.item())
+                last_old_approx_kl = float(old_approx_kl.item())
+                last_approx_kl = float(approx_kl.item())
+
+                loss = pg_loss - args.ent_coef * entropy_loss + args.vf_coef * v_loss
+
+                optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+                optimizer.step()
+
+        """
+                end = start + args.minibatch_size
+                mb_inds = b_inds[start:end]
+                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
+                logratio = newlogprob - b_logprobs[mb_inds]
+                ratio = logratio.exp()
+                with torch.no_grad():
+                    # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                    old_approx_kl = (-logratio).mean()
+                    approx_kl = ((ratio - 1) - logratio).mean()
+                    clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
+                if args.target_kl is not None and approx_kl > args.target_kl:
+                    break
+                mb_advantages = b_advantages[mb_inds]
+                if args.norm_adv:
+                    mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+                # Policy loss
+                pg_loss1 = -mb_advantages * ratio
+                pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
+                pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+                # Value loss
+                newvalue = newvalue.view(-1)
                 if args.clip_vloss:
                     v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
                     v_clipped = b_values[mb_inds] + torch.clamp(
@@ -730,28 +810,22 @@ def train(args: FPOArgs):
                         args.clip_coef,
                     )
                     v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
-                    v_loss = 0.5 * torch.max(v_loss_unclipped, v_loss_clipped).mean()
+                    v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+                    v_loss = 0.5 * v_loss_max.mean()
                 else:
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
-
-                # Optional CFM regularizer on current θ (pure FPO works with 0.0)
-                cfm_reg = L_new.mean() * args.cfm_loss_coef
-
-                loss = pg_loss + args.vf_coef * v_loss + cfm_reg
-
+                entropy_loss = entropy.mean()
+                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
                 optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
                 optimizer.step()
+            """
 
-                # Clipfrac for monitoring (how often |r-1| > εclip)
-                with torch.no_grad():
-                    clipfracs.append(((r_fpo - 1.0).abs() > args.clip_coef).float().mean().item())
 
+            #if args.target_kl is not None and approx_kl > args.target_kl: break
         update_time = time.perf_counter() - update_time
         cumulative_times["update_time"] += update_time
-
-        # Logging
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
@@ -759,31 +833,28 @@ def train(args: FPOArgs):
         logger.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
         logger.add_scalar("losses/value_loss", v_loss.item(), global_step)
         logger.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
+        logger.add_scalar("losses/entropy", entropy_loss.item(), global_step)
+        logger.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
+        logger.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         logger.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         logger.add_scalar("losses/explained_variance", explained_var, global_step)
-        logger.add_scalar("losses/cfm_loss", L_new.mean().item(), global_step)
-        logger.add_scalar("fpo/r_fpo_mean", float(np.mean(r_fpo_means)) if r_fpo_means else 1.0, global_step)
-
         print("SPS:", int(global_step / (time.time() - start_time)))
         logger.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
         logger.add_scalar("time/step", global_step, global_step)
         logger.add_scalar("time/update_time", update_time, global_step)
         logger.add_scalar("time/rollout_time", rollout_time, global_step)
+        logger.add_scalar("losses/entropy", last_entropy_loss, global_step)
+        logger.add_scalar("losses/old_approx_kl", last_old_approx_kl, global_step)
+        logger.add_scalar("losses/approx_kl", last_approx_kl, global_step)
+
         logger.add_scalar("time/rollout_fps", args.num_envs * args.num_steps / rollout_time, global_step)
         for k, v in cumulative_times.items():
             logger.add_scalar(f"time/total_{k}", v, global_step)
-        logger.add_scalar(
-            "time/total_rollout+update_time",
-            cumulative_times["rollout_time"] + cumulative_times["update_time"],
-            global_step,
-        )
-
+        logger.add_scalar("time/total_rollout+update_time", cumulative_times["rollout_time"] + cumulative_times["update_time"], global_step)
     if args.save_model and not args.evaluate:
-        model_path = f"runs/{run_name}/final_fpo_ckpt.pt"
+        model_path = f"runs/{run_name}/final_ckpt.pt"
         torch.save(agent.state_dict(), model_path)
         print(f"model saved to {model_path}")
 
     envs.close()
-    if logger is not None:
-        logger.close()
-
+    if logger is not None: logger.close()

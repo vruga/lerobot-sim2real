@@ -8,7 +8,7 @@ import json
 from typing import Optional
 import tyro
 
-from lerobot_sim2real.rl.fpo_rgb import FPOArgs, train
+from lerobot_sim2real.rl.fpo_rgb import PPOArgs as FPOArgs, train
 
 @dataclass
 class Args:
