@@ -25,10 +25,10 @@ python lerobot_sim2real/scripts/train_fpo_rgb.py \
   --fpo.eval-freq 25 \
   --fpo.no-partial-reset \
   --fpo.learning-rate 3e-4 \
-  --fpo.vf-coef 0.7 \
+  --fpo.vf-coef 0.2\
   --fpo.ent-coef 0.0 \
   --fpo.clip-coef 0.1 \
-  --fpo.fpo-num-steps 8 \
+  --fpo.fpo-num-steps 20\
   --fpo.fpo-num-train-samples 32 \
   --fpo.fpo-logratio-clip 0.7 \
   --fpo.render-mode all \

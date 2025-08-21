@@ -52,10 +52,10 @@ class PPOArgs:
 
     # === FPO (Diffusion Policy) additions ===
     fpo_enable: bool = True                    # set False to fall back to PPO (if you keep code paths)
-    fpo_num_steps: int = 10                    # diffusion Euler steps
-    fpo_num_train_samples: int = 16            # CFM Monte-Carlo samples per transition
+    fpo_num_steps: int = 20                    # diffusion Euler steps
+    fpo_num_train_samples:int = 8            # CFM Monte-Carlo samples per transition
     fpo_fixed_noise_inference: bool = False    # reproducible eval if True
-    fpo_logratio_clip: float = 3.0             # clamp for stability in exp(diff)
+    fpo_logratio_clip: float = 2.0             # clamp for stability in exp(diff)
     positive_advantage: bool = False           # optional softplus on advantages
 
 
@@ -70,7 +70,7 @@ class PPOArgs:
     """whether to include state information in observations"""
     total_timesteps: int = 10000000
     """total timesteps of the experiments"""
-    learning_rate: float = 3e-4
+    learning_rate: float = 1e-4
     """the learning rate of the optimizer"""
     num_envs: int = 512
     """the number of parallel environments"""
@@ -90,7 +90,7 @@ class PPOArgs:
     """for benchmarking purposes we want to reconfigure the eval environment each reset to ensure objects are randomized in some tasks"""
     control_mode: Optional[str] = None
     """the control mode to use for the environment"""
-    anneal_lr: bool = False
+    anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
     gamma: float = 0.8
     """the discount factor gamma"""
@@ -104,7 +104,7 @@ class PPOArgs:
     """Toggles advantages normalization"""
     clip_coef: float = 0.2
     """the surrogate clipping coefficient"""
-    clip_vloss: bool = False
+    clip_vloss: bool = True
     """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
     ent_coef: float = 0.0
     """coefficient of the entropy"""
@@ -156,9 +156,9 @@ class DiffusionVelocityNet(nn.Module):
 
 class DiffusionPolicyHead(nn.Module):
     """
-    Euler diffusion + CFM loss helper. Conditions on visual features.
+    Changing here Euler diffusion + CFM loss helper. Conditions on visual features.
     """
-    def __init__(self, latent_dim: int, action_dim: int, num_steps: int = 10, fixed_noise_inference: bool = False):
+    def __init__(self, latent_dim: int, action_dim: int, num_steps: int = 20, fixed_noise_inference: bool = False):
         super().__init__()
         self.latent_dim = latent_dim
         self.action_dim = action_dim
@@ -168,7 +168,7 @@ class DiffusionPolicyHead(nn.Module):
         self.register_buffer("init_noise", torch.randn(1, action_dim))
 
     @torch.no_grad()
-    def sample_action_with_info(self, features: torch.Tensor, num_train_samples: int = 16):
+    def sample_action_with_info(self, features: torch.Tensor, num_train_samples: int = 8):
         device = features.device
         B, A = features.size(0), self.action_dim
         dt = 1.0 / self.num_steps
@@ -181,9 +181,10 @@ class DiffusionPolicyHead(nn.Module):
 
         x_t = eps0.clone()
         for step in range(self.num_steps):
-            t_val = step * dt
+            t_val = (step + 0.5) * dt #Changes here 
             t = torch.full((B, 1), t_val, device=device)
-            v = self.velocity(features, x_t, t)
+            # Multiplying by 0.25 (scale)
+            v = 0.25 * self.velocity(features, x_t, t)
             x_t = x_t + dt * v
 
         x1 = x_t  # final action
@@ -371,6 +372,8 @@ class Agent(nn.Module):
         self.critic = nn.Sequential(
             layer_init(nn.Linear(latent_size, 512)),
             nn.ReLU(inplace=True),
+            layer_init(nn.Linear(512,512)), #Changes here - adding a layer to the critic network)
+            nn.ReLU(inplace=True),
             layer_init(nn.Linear(512, 1)),
         )
 
@@ -379,7 +382,7 @@ class Agent(nn.Module):
         self.action_low = torch.as_tensor(envs.unwrapped.single_action_space.low, dtype=torch.float32)
         self.action_high = torch.as_tensor(envs.unwrapped.single_action_space.high, dtype=torch.float32)
 
-        n_steps = (args.fpo_num_steps if args is not None else 10)
+        n_steps = (args.fpo_num_steps if args is not None else 20)
         fixed = (args.fpo_fixed_noise_inference if args is not None else False)
         self.actor_dp = DiffusionPolicyHead(
             latent_dim=latent_size,
@@ -414,6 +417,8 @@ class Agent(nn.Module):
         feats = self.feature_net(x)
         a, _, _, _ = self.actor_dp.sample_action_with_info(feats, num_train_samples=1)
         a = self._clip_to_action_space(a)
+        if a.shape[-1] >= 5:
+            a[...,4] = 0.0   #Changes here
         v = self.critic(feats)
         dummy_logprob = torch.zeros(a.size(0), device=a.device)
         dummy_entropy = torch.zeros_like(dummy_logprob)
@@ -597,7 +602,8 @@ def train(args: PPOArgs):
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
             frac = 1.0 - (iteration - 1.0) / args.num_iterations
-            lrnow = frac * args.learning_rate
+            lrnow = max(frac * args.learning_rate , 0.0)
+            print(f"Current learning rate: {lrnow}")
             optimizer.param_groups[0]["lr"] = lrnow
         rollout_time = time.perf_counter()
         for step in range(0, args.num_steps):
