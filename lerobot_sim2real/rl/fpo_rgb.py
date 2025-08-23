@@ -58,7 +58,7 @@ class PPOArgs:
     fpo_num_steps: int = 2                     # diffusion Euler steps (reduced further for stability)
     fpo_num_train_samples: int = 8             # CFM Monte-Carlo samples per transition (reduced)
     fpo_fixed_noise_inference: bool = False # reproducible eval for consistency
-    fpo_logratio_clip: float = 2.0             # clamp for stability in exp(diff) (reduced)
+    fpo_logratio_clip: float = 0.2             # clamp for stability in exp(diff) (reduced)
     positive_advantage: bool = False           # optional softplus on advantages
 
 
@@ -97,7 +97,7 @@ class PPOArgs:
     """Toggle learning rate annealing for policy and value networks"""
     gamma: float = 0.95
     """the discount factor gamma"""
-    gae_lambda: float = 0.95
+    gae_lambda: float = 0.98
     """the lambda for the general advantage estimation"""
     num_minibatches: int = 32
     """the number of mini-batches"""
@@ -107,11 +107,11 @@ class PPOArgs:
     """Toggles advantages normalization"""
     clip_coef: float = 0.2
     """the surrogate clipping coefficient"""
-    clip_vloss: bool = False
+    clip_vloss: bool = True
     """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
-    ent_coef: float = 0.01
+    ent_coef: float = 0.00
     """coefficient of the entropy"""
-    vf_coef: float = 0.25
+    vf_coef: float = 1.2
     """coefficient of the value function"""
     max_grad_norm: float = 0.5
     """the maximum norm for the gradient clipping"""
