@@ -1,36 +1,13 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-SEED="${1:-3}"
-ENV_ID="${2:-SO100GraspCube-v1}"
-ENV_KWARGS_JSON="${3:-env_config.json}"
-
-RUN_NAME="fpo-${ENV_ID}-rgb-${SEED}"
-
-python lerobot_sim2real/scripts/train_fpo_rgb.py \
-  --env-id "${ENV_ID}" \
-  --env-kwargs-json-path "${ENV_KWARGS_JSON}" \
-  --fpo.seed "${SEED}" \
-  --fpo.exp-name "${RUN_NAME}" \
-  --fpo.track \
-  --fpo.wandb-project-name "SO100-ManiSkill" \
-  --fpo.num-envs 1024 \
-  --fpo.num-steps 32 \
-  --fpo.update-epochs 6 \
-  --fpo.num-minibatches 64 \
-  --fpo.total-timesteps 10000000 \
-  --fpo.gamma 0.99 \
-  --fpo.num-eval-envs 8 \
-  --fpo.num-eval-steps 100 \
-  --fpo.eval-freq 25 \
-  --fpo.no-partial-reset \
-  --fpo.learning-rate 3e-4 \
-  --fpo.vf-coef 0.7 \
-  --fpo.ent-coef 0.0 \
-  --fpo.clip-coef 0.1 \
-  --fpo.fpo-num-steps 8 \
-  --fpo.fpo-num-train-samples 32 \
-  --fpo.fpo-logratio-clip 0.7 \
-  --fpo.render-mode all \
-  --fpo.no-capture-video
-
+seed=3
+python lerobot_sim2real/rl/train_fpo.py --env-id="SO100GraspCube-v1" --env-kwargs-json-path=env_config.json \
+       --ppo.seed=${seed} \
+       --ppo.num_envs=512 --ppo.num-steps=32 --ppo.update_epochs=4 --ppo.num_minibatches=16 \
+       --ppo.total_timesteps=50_000_000 --ppo.gamma=0.95 --ppo.gae-lambda=0.95 \
+       --ppo.learning-rate=1e-4 --ppo.reward-scale=1.0 \
+       --ppo.num_eval_envs=8 --ppo.num-eval-steps=64 --ppo.no-partial-reset \
+       --ppo.fpo-num-steps=5 --ppo.fpo-num-train-samples=8 --ppo.fpo-logratio-clip=2.0 \
+       --ppo.fpo-fixed-noise-inference \
+       --ppo.clip-coef=0.1 --ppo.max-grad-norm=0.3 --ppo.target-kl=0.05 \
+       --ppo.exp-name="fpo-SO100GraspCube-v1-rgb-stable-${seed}" \
+       --ppo.track --ppo.wandb_project_name "SO100-ManiSkill-FPO"

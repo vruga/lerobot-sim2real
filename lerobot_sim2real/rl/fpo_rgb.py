@@ -21,6 +21,9 @@ from mani_skill.utils.wrappers.flatten import FlattenActionSpaceWrapper, Flatten
 from mani_skill.utils.wrappers.record import RecordEpisode
 from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 
+# Local imports
+from .network import FeedForwardNN
+
 @dataclass
 class PPOArgs:
     exp_name: Optional[str] = None
@@ -52,10 +55,10 @@ class PPOArgs:
 
     # === FPO (Diffusion Policy) additions ===
     fpo_enable: bool = True                    # set False to fall back to PPO (if you keep code paths)
-    fpo_num_steps: int = 10                    # diffusion Euler steps
-    fpo_num_train_samples: int = 16            # CFM Monte-Carlo samples per transition
-    fpo_fixed_noise_inference: bool = False    # reproducible eval if True
-    fpo_logratio_clip: float = 3.0             # clamp for stability in exp(diff)
+    fpo_num_steps: int = 2                     # diffusion Euler steps (reduced further for stability)
+    fpo_num_train_samples: int = 8             # CFM Monte-Carlo samples per transition (reduced)
+    fpo_fixed_noise_inference: bool = False # reproducible eval for consistency
+    fpo_logratio_clip: float = 2.0             # clamp for stability in exp(diff) (reduced)
     positive_advantage: bool = False           # optional softplus on advantages
 
 
@@ -70,7 +73,7 @@ class PPOArgs:
     """whether to include state information in observations"""
     total_timesteps: int = 10000000
     """total timesteps of the experiments"""
-    learning_rate: float = 3e-4
+    learning_rate: float = 2e-4
     """the learning rate of the optimizer"""
     num_envs: int = 512
     """the number of parallel environments"""
@@ -92,9 +95,9 @@ class PPOArgs:
     """the control mode to use for the environment"""
     anneal_lr: bool = False
     """Toggle learning rate annealing for policy and value networks"""
-    gamma: float = 0.8
+    gamma: float = 0.95
     """the discount factor gamma"""
-    gae_lambda: float = 0.9
+    gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
     num_minibatches: int = 32
     """the number of mini-batches"""
@@ -106,9 +109,9 @@ class PPOArgs:
     """the surrogate clipping coefficient"""
     clip_vloss: bool = False
     """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
-    ent_coef: float = 0.0
+    ent_coef: float = 0.01
     """coefficient of the entropy"""
-    vf_coef: float = 0.5
+    vf_coef: float = 0.25
     """coefficient of the value function"""
     max_grad_norm: float = 0.5
     """the maximum norm for the gradient clipping"""
@@ -136,75 +139,154 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
-# new class diffusion network
-class DiffusionVelocityNet(nn.Module):
+class DiffusionPolicy(FeedForwardNN):
     """
-    Predicts velocity given [features, x_t, t].
-    Input dim = latent_dim + action_dim + 1; Output dim = action_dim
+    Extends FeedForwardNN for diffusion-based sampling with reproducible inference noise.
     """
-    def __init__(self, latent_dim: int, action_dim: int):
-        super().__init__()
-        self.net = nn.Sequential(
-            layer_init(nn.Linear(latent_dim + action_dim + 1, 512)),
-            nn.ReLU(inplace=True),
-            layer_init(nn.Linear(512, action_dim), std=np.sqrt(2)),
-        )
-
-    def forward(self, features: torch.Tensor, x_t: torch.Tensor, t: torch.Tensor):
-        return self.net(torch.cat([features, x_t, t], dim=1))
-
-
-class DiffusionPolicyHead(nn.Module):
-    """
-    Euler diffusion + CFM loss helper. Conditions on visual features.
-    """
-    def __init__(self, latent_dim: int, action_dim: int, num_steps: int = 10, fixed_noise_inference: bool = False):
-        super().__init__()
-        self.latent_dim = latent_dim
-        self.action_dim = action_dim
-        self.num_steps = num_steps
+    def __init__(self,
+                 state_dim: int,
+                 action_dim: int,
+                 device: torch.device = None,
+                 num_steps: int = 10,
+                 fixed_noise_inference: bool = False):
+        # Input dimension is state_dim + action_dim + 1 (for time)
+        super().__init__(state_dim + action_dim + 1, action_dim)
+        
+        # select device and move model
+        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.to(self.device)
+        
+        # store whether to use fixed noise during inference
         self.fixed_noise_inference = fixed_noise_inference
-        self.velocity = DiffusionVelocityNet(latent_dim, action_dim)
-        self.register_buffer("init_noise", torch.randn(1, action_dim))
+        # pre-sample a single noise vector for inference with smaller scale for stability
+        self.init_noise = torch.randn(1, action_dim, device=self.device) * 0.1
+        # num sampling step
+        self.num_steps = num_steps
+        self.state_dim = state_dim
+        self.action_dim = action_dim
 
-    @torch.no_grad()
-    def sample_action_with_info(self, features: torch.Tensor, num_train_samples: int = 16):
-        device = features.device
-        B, A = features.size(0), self.action_dim
-        dt = 1.0 / self.num_steps
+    def sample_action(self, state_norm: torch.Tensor) -> torch.Tensor:
+        """
+        Run manual Euler diffusion to denoise initial noise into action delta.
 
-        # inference noise
+        Args:
+            state_norm: Tensor of shape (state_dim,), normalized state in [-1,1]
+
+        Returns:
+            Tensor of shape (action_dim,) representing Δ action
+        """
+        # time step size
+        if state_norm.ndim == 1:
+            state_norm = state_norm.unsqueeze(0)
+        
+        num_steps = self.num_steps
+        dt = (1.0 / num_steps)
+        
+        # initialize x_t: use fixed or random noise for inference
         if self.fixed_noise_inference:
-            eps0 = self.init_noise.expand(B, -1).contiguous()
+            x_t = self.init_noise.clone()
         else:
-            eps0 = torch.randn(B, A, device=device)
+            x_t = torch.randn(1, self.action_dim, device=self.device) * 0.1
 
-        x_t = eps0.clone()
+        # perform Euler integration
+        for step in range(num_steps):
+            t_val = step * dt
+            t_tensor = torch.full((1, 1), t_val, device=self.device)
+            inp = torch.cat([state_norm.to(self.device), x_t, t_tensor], dim=1)
+            
+            with torch.no_grad():
+                velocity = self(inp)
+            x_t = x_t + dt * velocity
+
+        x_t_final = x_t[0]
+        return x_t_final
+
+    def sample_action_with_info(self, state_norm: torch.Tensor, num_train_samples: int = 100, include_inference_eps: bool = False):
+        """
+        Run Euler diffusion with tracking and return action + loss info.
+        state_norm is (B, state_dim) or (state_dim,).. output action is (B, action_dim) or (action_dim,)
+
+        Returns:
+            pred_action: final denoised action
+            x_t_path: all intermediate x_t steps [B, T+1, action_dim]  
+            eps: sampled eps used for initial noise [B, action_dim]
+            t: sampled time step [num_train_samples, 1]
+            initial_cfm_loss: scalar [B, num_train_samples]
+        """
+        if state_norm.ndim == 1:
+            state_norm = state_norm.unsqueeze(0)
+        
+        B = state_norm.size(0)
+        dt = 1.0 / self.num_steps
+        state_norm = state_norm.to(self.device)
+        
+        # Initialize noise for inference
+        if self.fixed_noise_inference:
+            eps = self.init_noise.expand(B, -1).contiguous()
+        else:
+            eps = torch.randn(B, self.action_dim, device=self.device) * 0.1
+            
+        x_t = eps.clone()
+        x_t_path = [x_t.detach().clone()]
+
+        # Perform Euler integration  
         for step in range(self.num_steps):
             t_val = step * dt
-            t = torch.full((B, 1), t_val, device=device)
-            v = self.velocity(features, x_t, t)
-            x_t = x_t + dt * v
+            t_tensor = torch.full((B, 1), t_val, device=self.device)
+            inp = torch.cat([state_norm, x_t, t_tensor], dim=1)
+            velocity = self(inp)
+            x_t = x_t + dt * velocity
+            x_t_path.append(x_t.detach().clone())
 
-        x1 = x_t  # final action
+        x_t_path = torch.stack(x_t_path, dim=1)
 
-        # MC samples for CFM baseline
-        eps = torch.randn(B, num_train_samples, A, device=device)    # [B, N, A]
-        t_s = torch.rand(B, num_train_samples, 1, device=device)     # [B, N, 1]
+        # Mine samples for training - create MC samples for CFM loss
+        eps_sample = torch.randn(B, num_train_samples, self.action_dim, device=self.device) * 0.1  # [B, N, A]
+        t = torch.rand(B, num_train_samples, 1, device=self.device)  # [B, N, 1]
+        x1 = x_t.unsqueeze(1).expand(-1, num_train_samples, -1).detach()  # [B, N, A]
+        state_tile = state_norm.unsqueeze(1).expand(-1, num_train_samples, -1)  # [B, N, state_dim]
 
-        init_loss = self.compute_cfm_loss(
-            features.unsqueeze(1).expand(-1, num_train_samples, -1).reshape(-1, features.size(1)),
-            x1.unsqueeze(1).expand(-1, num_train_samples, -1).reshape(-1, A),
-            eps.reshape(-1, A),
-            t_s.reshape(-1, 1),
-        ).view(B, num_train_samples)                                  # [B, N]
+        # Reshape for CFM loss computation
+        BN = B * num_train_samples
+        initial_cfm_loss = self.compute_cfm_loss(
+            state_tile.reshape(BN, -1),
+            x1.reshape(BN, -1), 
+            eps_sample.reshape(BN, -1),
+            t.reshape(BN, -1)
+        ).view(B, num_train_samples)  # [B, N]
 
-        return x1, eps, t_s, init_loss
+        # Return single sample if input was 1D
+        if B == 1:
+            return x_t[0], x_t_path, eps_sample, t, initial_cfm_loss.detach()
+        else:
+            return x_t, x_t_path, eps_sample, t, initial_cfm_loss.detach()
+        
+    def compute_cfm_loss(self, state_norm: torch.Tensor,
+                         x1: torch.Tensor,
+                         eps: torch.Tensor,
+                         t: torch.Tensor) -> torch.Tensor:
+        """
+        Compute conditional flow matching loss.
 
-    def compute_cfm_loss(self, features: torch.Tensor, x1: torch.Tensor, eps: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        x_t = (1.0 - t) * eps + t * x1          # [B, A]
-        v_pred = self.velocity(features, x_t, t)
-        return torch.nn.functional.mse_loss(v_pred, x1 - eps, reduction="none").mean(dim=1)  # [B]
+        Args:
+            state_norm: [B, state_dim] normalized input state
+            x1: [B, action_dim] final denoised action
+            eps: [B, action_dim] sampled noise
+            t: [B, 1] time steps
+
+        Returns:
+            loss: [B] per-sample loss
+        """
+        B, D_a = eps.shape
+        assert x1.shape == (B, D_a), f"x1 must be [B, D_a], got {x1.shape}"
+        assert state_norm.shape[0] == B, f"state_norm must have batch size {B}, got {state_norm.shape[0]}"
+        assert t.shape == (B, 1), f"t must be [B, 1], got {t.shape}"
+
+        x_t = (1 - t) * eps + t * x1  # [B, D_a]
+        inp = torch.cat([state_norm, x_t, t], dim=1)  # [B, state_dim + D_a + 1]
+        velocity_pred = self(inp)  # [B, D_a]
+
+        return torch.nn.functional.mse_loss(velocity_pred, x1 - eps, reduction='none').mean(dim=1)  # [B]
 
 class DictArray(object):
     def __init__(self, buffer_shape, element_space, data_dict=None, device=None):
@@ -315,49 +397,6 @@ class NatureCNN(nn.Module):
             encoded_tensor_list.append(extractor(obs))
         return torch.cat(encoded_tensor_list, dim=1)
 
-#old class
-'''
-class Agent(nn.Module):
-    def __init__(self, envs, sample_obs):
-        super().__init__()
-        self.feature_net = NatureCNN(sample_obs=sample_obs)
-        # latent_size = np.array(envs.unwrapped.single_observation_space.shape).prod()
-        latent_size = self.feature_net.out_features
-        self.critic = nn.Sequential(
-            layer_init(nn.Linear(latent_size, 512)),
-            nn.ReLU(inplace=True),
-            layer_init(nn.Linear(512, 1)),
-        )
-        self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(latent_size, 512)),
-            nn.ReLU(inplace=True),
-            layer_init(nn.Linear(512, np.prod(envs.unwrapped.single_action_space.shape)), std=0.01*np.sqrt(2)),
-        )
-        self.actor_logstd = nn.Parameter(torch.ones(1, np.prod(envs.unwrapped.single_action_space.shape)) * -0.5)
-    def get_features(self, x):
-        return self.feature_net(x)
-    def get_value(self, x):
-        x = self.feature_net(x)
-        return self.critic(x)
-    def get_action(self, x, deterministic=False):
-        x = self.feature_net(x)
-        action_mean = self.actor_mean(x)
-        if deterministic:
-            return action_mean
-        action_logstd = self.actor_logstd.expand_as(action_mean)
-        action_std = torch.exp(action_logstd)
-        probs = Normal(action_mean, action_std)
-        return probs.sample()
-    def get_action_and_value(self, x, action=None):
-        x = self.feature_net(x)
-        action_mean = self.actor_mean(x)
-        action_logstd = self.actor_logstd.expand_as(action_mean)
-        action_std = torch.exp(action_logstd)
-        probs = Normal(action_mean, action_std)
-        if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
-'''
 
 #new class agent fpo
 class Agent(nn.Module):
@@ -381,9 +420,12 @@ class Agent(nn.Module):
 
         n_steps = (args.fpo_num_steps if args is not None else 10)
         fixed = (args.fpo_fixed_noise_inference if args is not None else False)
-        self.actor_dp = DiffusionPolicyHead(
-            latent_dim=latent_size,
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        self.actor_dp = DiffusionPolicy(
+            state_dim=latent_size,
             action_dim=action_dim,
+            device=device,
             num_steps=n_steps,
             fixed_noise_inference=fixed,
         )
@@ -399,20 +441,25 @@ class Agent(nn.Module):
     def _clip_to_action_space(self, a: torch.Tensor) -> torch.Tensor:
         low = self.action_low.to(a.device)
         high = self.action_high.to(a.device)
-        return torch.max(torch.min(a, high), low)
+        # Apply a smoother clipping with tanh scaling to prevent extreme actions
+        a_range = high - low
+        a_center = (high + low) / 2
+        # Scale down actions to 80% of the range for safety
+        a_scaled = a_center + 0.8 * a_range * torch.tanh((a - a_center) / a_range)
+        return torch.max(torch.min(a_scaled, high), low)
 
     # ---- PPO-compatible API (dummy logprob/entropy) ----
     @torch.no_grad()
     def get_action(self, x, deterministic=False):
         feats = self.feature_net(x)
-        a, _, _, _ = self.actor_dp.sample_action_with_info(feats, num_train_samples=1)
+        a, _, _, _, _ = self.actor_dp.sample_action_with_info(feats, num_train_samples=1)
         a = self._clip_to_action_space(a)
         return a  # determinism controlled by fpo_fixed_noise_inference
 
     @torch.no_grad()
     def get_action_and_value(self, x, action=None):
         feats = self.feature_net(x)
-        a, _, _, _ = self.actor_dp.sample_action_with_info(feats, num_train_samples=1)
+        a, _, _, _, _ = self.actor_dp.sample_action_with_info(feats, num_train_samples=1)
         a = self._clip_to_action_space(a)
         v = self.critic(feats)
         dummy_logprob = torch.zeros(a.size(0), device=a.device)
@@ -424,15 +471,15 @@ class Agent(nn.Module):
     @torch.no_grad()
     def fpo_action_value_and_info(self, x):
         feats = self.feature_net(x)  # [B, L]
-        a, eps, t_s, init_loss = self.actor_dp.sample_action_with_info(
+        a, _, eps, t_s, init_loss = self.actor_dp.sample_action_with_info(
             feats, num_train_samples=(self.args.fpo_num_train_samples if self.args else 16)
         )
         a = self._clip_to_action_space(a)
         v = self.critic(feats)
         return a, v, feats, eps, t_s, init_loss
 
-    def compute_cfm_loss(self, features, x1, eps, t):
-        return self.actor_dp.compute_cfm_loss(features, x1, eps, t)
+    def compute_cfm_loss(self, state_norm, x1, eps, t):
+        return self.actor_dp.compute_cfm_loss(state_norm, x1, eps, t)
 
 class Logger:
     def __init__(self, log_wandb=False, tensorboard: SummaryWriter = None) -> None:
@@ -703,7 +750,7 @@ def train(args: PPOArgs):
         b_inds = np.arange(args.batch_size)
         clipfracs = []
         update_time = time.perf_counter()
-        last_entropy_loss = 0.0
+        last_entropy_loss = 0.00
         last_old_approx_kl = 0.0
         last_approx_kl = 0.0
 
@@ -749,10 +796,14 @@ def train(args: PPOArgs):
                 if args.positive_advantage:
                     mb_advantages = torch.nn.functional.softplus(mb_advantages)
 
-                # Policy loss (rho replaces likelihood ratio)
+                # Policy loss (rho replaces likelihood ratio) with gradient penalty
                 pg_loss1 = -mb_advantages * rho
                 pg_loss2 = -mb_advantages * clip_rho
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+                
+                # Add regularization to prevent extreme policy updates
+                reg_loss = 0.01 * torch.mean(rho.log().pow(2))  # KL penalty on rho
+                pg_loss = pg_loss + reg_loss
 
                 # Value loss (unchanged)
                 if args.clip_vloss:
@@ -780,50 +831,10 @@ def train(args: PPOArgs):
                 nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
                 optimizer.step()
 
-        """
-                end = start + args.minibatch_size
-                mb_inds = b_inds[start:end]
-                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
-                logratio = newlogprob - b_logprobs[mb_inds]
-                ratio = logratio.exp()
-                with torch.no_grad():
-                    # calculate approx_kl http://joschu.net/blog/kl-approx.html
-                    old_approx_kl = (-logratio).mean()
-                    approx_kl = ((ratio - 1) - logratio).mean()
-                    clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
-                if args.target_kl is not None and approx_kl > args.target_kl:
-                    break
-                mb_advantages = b_advantages[mb_inds]
-                if args.norm_adv:
-                    mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
-                # Policy loss
-                pg_loss1 = -mb_advantages * ratio
-                pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
-                pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-                # Value loss
-                newvalue = newvalue.view(-1)
-                if args.clip_vloss:
-                    v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
-                    v_clipped = b_values[mb_inds] + torch.clamp(
-                        newvalue - b_values[mb_inds],
-                        -args.clip_coef,
-                        args.clip_coef,
-                    )
-                    v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
-                    v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-                    v_loss = 0.5 * v_loss_max.mean()
-                else:
-                    v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
-                entropy_loss = entropy.mean()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
-                optimizer.zero_grad()
-                loss.backward()
-                nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
-                optimizer.step()
-            """
-
-
-            #if args.target_kl is not None and approx_kl > args.target_kl: break
+            # Early stopping based on regularization loss (proxy for KL divergence)
+            if reg_loss > args.target_kl: 
+                print(f"Early stopping at epoch {epoch} due to high regularization loss: {reg_loss:.4f}")
+                break
         update_time = time.perf_counter() - update_time
         cumulative_times["update_time"] += update_time
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
