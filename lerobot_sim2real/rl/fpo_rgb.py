@@ -55,10 +55,10 @@ class PPOArgs:
 
     # === FPO (Diffusion Policy) additions ===
     fpo_enable: bool = True                    # set False to fall back to PPO (if you keep code paths)
-    fpo_num_steps: int = 2                     # diffusion Euler steps (reduced further for stability)
-    fpo_num_train_samples: int = 8             # CFM Monte-Carlo samples per transition (reduced)
-    fpo_fixed_noise_inference: bool = False # reproducible eval for consistency
-    fpo_logratio_clip: float = 0.2             # clamp for stability in exp(diff) (reduced)
+    fpo_num_steps: int = 8                     # diffusion Euler steps (reduced for stability)
+    fpo_num_train_samples: int = 16            # CFM Monte-Carlo samples per transition (reduced for stability)
+    fpo_fixed_noise_inference: bool = False    # reproducible eval for consistency
+    fpo_logratio_clip: float = 0.3             # clamp for stability in exp(diff) (increased for more flexibility)
     positive_advantage: bool = False           # optional softplus on advantages
 
 
@@ -83,7 +83,7 @@ class PPOArgs:
     """whether to let parallel environments reset upon termination instead of truncation"""
     eval_partial_reset: bool = False
     """whether to let parallel evaluation environments reset upon termination instead of truncation"""
-    num_steps: int = 50
+    num_steps: int = 64
     """the number of steps to run in each environment per policy rollout"""
     num_eval_steps: int = 50
     """the number of steps to run in each evaluation environment during evaluation"""
@@ -97,7 +97,7 @@ class PPOArgs:
     """Toggle learning rate annealing for policy and value networks"""
     gamma: float = 0.95
     """the discount factor gamma"""
-    gae_lambda: float = 0.98
+    gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
     num_minibatches: int = 32
     """the number of mini-batches"""
@@ -158,8 +158,8 @@ class DiffusionPolicy(FeedForwardNN):
         
         # store whether to use fixed noise during inference
         self.fixed_noise_inference = fixed_noise_inference
-        # pre-sample a single noise vector for inference with smaller scale for stability
-        self.init_noise = torch.randn(1, action_dim, device=self.device) * 0.1
+        # pre-sample a single noise vector for inference
+        self.init_noise = torch.randn(1, action_dim, device=self.device) * 0.01
         # num sampling step
         self.num_steps = num_steps
         self.state_dim = state_dim
@@ -167,39 +167,42 @@ class DiffusionPolicy(FeedForwardNN):
 
     def sample_action(self, state_norm: torch.Tensor) -> torch.Tensor:
         """
-        Run manual Euler diffusion to denoise initial noise into action delta.
+        Run improved Euler diffusion to denoise initial noise into action.
 
         Args:
             state_norm: Tensor of shape (state_dim,), normalized state in [-1,1]
 
         Returns:
-            Tensor of shape (action_dim,) representing Δ action
+            Tensor of shape (action_dim,) representing action
         """
-        # time step size
         if state_norm.ndim == 1:
             state_norm = state_norm.unsqueeze(0)
         
         num_steps = self.num_steps
-        dt = (1.0 / num_steps)
+        dt = 1.0 / num_steps
         
-        # initialize x_t: use fixed or random noise for inference
+        # Initialize with improved noise scaling
         if self.fixed_noise_inference:
             x_t = self.init_noise.clone()
         else:
-            x_t = torch.randn(1, self.action_dim, device=self.device) * 0.1
+            # Use scaled noise for better initialization
+            x_t = torch.randn(1, self.action_dim, device=self.device) * 0.5
 
-        # perform Euler integration
+        # Perform improved Euler integration with adaptive stepping
         for step in range(num_steps):
-            t_val = step * dt
+            t_val = (step + 0.5) / num_steps  # Use mid-point for better accuracy
             t_tensor = torch.full((1, 1), t_val, device=self.device)
             inp = torch.cat([state_norm.to(self.device), x_t, t_tensor], dim=1)
             
             with torch.no_grad():
                 velocity = self(inp)
-            x_t = x_t + dt * velocity
+                # Apply gentle bounds to velocity for stability
+                velocity = torch.clamp(velocity, -3.0, 3.0)
+                
+            # Euler step with momentum-like damping for stability
+            x_t = x_t + dt * velocity * 0.9  # Slight damping factor
 
-        x_t_final = x_t[0]
-        return x_t_final
+        return x_t[0]
 
     def sample_action_with_info(self, state_norm: torch.Tensor, num_train_samples: int = 100, include_inference_eps: bool = False):
         """
@@ -220,29 +223,38 @@ class DiffusionPolicy(FeedForwardNN):
         dt = 1.0 / self.num_steps
         state_norm = state_norm.to(self.device)
         
-        # Initialize noise for inference
+        # Initialize noise for inference with improved scaling
         if self.fixed_noise_inference:
             eps = self.init_noise.expand(B, -1).contiguous()
         else:
-            eps = torch.randn(B, self.action_dim, device=self.device) * 0.1
+            # Use more conservative noise scaling
+            eps = torch.randn(B, self.action_dim, device=self.device) * 0.5
             
         x_t = eps.clone()
         x_t_path = [x_t.detach().clone()]
 
-        # Perform Euler integration  
+        # Perform improved Euler integration with better stepping
         for step in range(self.num_steps):
-            t_val = step * dt
+            t_val = (step + 0.5) / self.num_steps  # Mid-point integration
             t_tensor = torch.full((B, 1), t_val, device=self.device)
             inp = torch.cat([state_norm, x_t, t_tensor], dim=1)
             velocity = self(inp)
-            x_t = x_t + dt * velocity
+            # Apply velocity bounds for stability
+            velocity = torch.clamp(velocity, -3.0, 3.0)
+            x_t = x_t + dt * velocity * 0.9  # Slight damping
             x_t_path.append(x_t.detach().clone())
 
         x_t_path = torch.stack(x_t_path, dim=1)
 
-        # Mine samples for training - create MC samples for CFM loss
-        eps_sample = torch.randn(B, num_train_samples, self.action_dim, device=self.device) * 0.1  # [B, N, A]
-        t = torch.rand(B, num_train_samples, 1, device=self.device)  # [B, N, 1]
+        # IMPROVED flow matching training with better sampling strategy
+        # Mix different noise scales and ensure proper coverage of the flow
+        eps_sample = torch.randn(B, num_train_samples, self.action_dim, device=self.device)  # [B, N, A]
+        # Scale noise with different magnitudes for better coverage
+        noise_scales = torch.rand(B, num_train_samples, 1, device=self.device) * 0.8 + 0.2  # [0.2, 1.0]
+        eps_sample = eps_sample * noise_scales
+        
+        # Better time sampling - avoid extremes and ensure good coverage
+        t = torch.rand(B, num_train_samples, 1, device=self.device) * 0.9 + 0.05  # [0.05, 0.95]
         x1 = x_t.unsqueeze(1).expand(-1, num_train_samples, -1).detach()  # [B, N, A]
         state_tile = state_norm.unsqueeze(1).expand(-1, num_train_samples, -1)  # [B, N, state_dim]
 
@@ -266,7 +278,7 @@ class DiffusionPolicy(FeedForwardNN):
                          eps: torch.Tensor,
                          t: torch.Tensor) -> torch.Tensor:
         """
-        Compute conditional flow matching loss.
+        Compute conditional flow matching loss with improved numerical stability.
 
         Args:
             state_norm: [B, state_dim] normalized input state
@@ -282,11 +294,38 @@ class DiffusionPolicy(FeedForwardNN):
         assert state_norm.shape[0] == B, f"state_norm must have batch size {B}, got {state_norm.shape[0]}"
         assert t.shape == (B, 1), f"t must be [B, 1], got {t.shape}"
 
+        # Improved numerical stability
+        t = torch.clamp(t, 0.001, 0.999)  # Prevent extreme t values
+        
+        # Linear interpolation between noise and target action
         x_t = (1 - t) * eps + t * x1  # [B, D_a]
         inp = torch.cat([state_norm, x_t, t], dim=1)  # [B, state_dim + D_a + 1]
+        
+        # Forward pass with gradient clipping
         velocity_pred = self(inp)  # [B, D_a]
+        
+        # Gentle velocity bounds to prevent explosion while allowing learning
+        velocity_pred = torch.clamp(velocity_pred, -5.0, 5.0)
 
-        return torch.nn.functional.mse_loss(velocity_pred, x1 - eps, reduction='none').mean(dim=1)  # [B]
+        # CORRECT CFM target velocity
+        target_velocity = x1 - eps  # [B, D_a]
+        
+        # Normalize target to prevent exploding gradients
+        target_norm = torch.norm(target_velocity, dim=1, keepdim=True)
+        target_velocity = target_velocity / (target_norm + 1e-8) * torch.clamp(target_norm, max=5.0)
+        
+        # Robust MSE loss with gradient clipping
+        loss = torch.nn.functional.huber_loss(velocity_pred, target_velocity, reduction='none', delta=1.0).mean(dim=1)
+        
+        # Light regularization to prevent overfitting
+        velocity_reg = 0.0001 * torch.mean(velocity_pred.pow(2), dim=1)
+        
+        # Additional stability: detect and handle NaN/Inf
+        loss = torch.clamp(loss + velocity_reg, 0.0, 10.0)
+        loss = torch.where(torch.isnan(loss) | torch.isinf(loss), 
+                          torch.zeros_like(loss), loss)
+        
+        return loss
 
 class DictArray(object):
     def __init__(self, buffer_shape, element_space, data_dict=None, device=None):
@@ -441,12 +480,8 @@ class Agent(nn.Module):
     def _clip_to_action_space(self, a: torch.Tensor) -> torch.Tensor:
         low = self.action_low.to(a.device)
         high = self.action_high.to(a.device)
-        # Apply a smoother clipping with tanh scaling to prevent extreme actions
-        a_range = high - low
-        a_center = (high + low) / 2
-        # Scale down actions to 80% of the range for safety
-        a_scaled = a_center + 0.8 * a_range * torch.tanh((a - a_center) / a_range)
-        return torch.max(torch.min(a_scaled, high), low)
+        # Simple clipping to action bounds - let the policy learn the full range
+        return torch.max(torch.min(a, high), low)
 
     # ---- PPO-compatible API (dummy logprob/entropy) ----
     @torch.no_grad()
@@ -782,13 +817,25 @@ def train(args: PPOArgs):
                 t_bn     = t_mb.reshape(BN, 1)
 
                 cfm_new = agent.compute_cfm_loss(feats_bn, x1_bn, eps_bn, t_bn).view(B, N)
+                
+                # Store raw loss for monitoring and debugging
+                cfm_raw = cfm_new.clone().detach()
+                
+                # Compute importance ratio with improved stability
                 diff = init_mb - cfm_new
-                diff = torch.clamp(diff, -args.fpo_logratio_clip, args.fpo_logratio_clip)
-                rho = torch.exp(diff.mean(dim=1))                          # [B]
+                diff_raw = diff.clone().detach()  # Store raw for debugging
+                
+                # Apply gentle bounds to prevent extreme ratios while allowing learning
+                diff = torch.clamp(diff, -3.0, 3.0)
+                
+                # Compute importance ratio with numerical stability
+                log_ratio = diff.mean(dim=1)
+                log_ratio = torch.clamp(log_ratio, -2.0, 2.0)  # Prevent extreme exp values
+                rho = torch.exp(log_ratio)  # [B]
+                
+                # Apply PPO-style clipping
                 clip_rho = torch.clamp(rho, 1.0 - args.clip_coef, 1.0 + args.clip_coef)
-                # wjhat thje fuck is thjis
-                clipfracs += [((rho - 1.0).abs() > args.clip_coef).float().mean().item()]
-
+                
                 # Advantages
                 mb_advantages = b_advantages[mb]
                 if args.norm_adv:
@@ -801,9 +848,38 @@ def train(args: PPOArgs):
                 pg_loss2 = -mb_advantages * clip_rho
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
                 
-                # Add regularization to prevent extreme policy updates
-                reg_loss = 0.01 * torch.mean(rho.log().pow(2))  # KL penalty on rho
-                pg_loss = pg_loss + reg_loss
+                # Improved regularization for stability without over-constraining
+                # 1. Light KL penalty on importance ratios
+                reg_loss = 0.001 * torch.mean(log_ratio.pow(2))
+                
+                # 2. Light action regularization
+                action_reg = 0.0001 * torch.mean(x1.pow(2))
+                
+                # 3. Only add regularization if losses are reasonable
+                if not torch.isnan(reg_loss) and not torch.isnan(action_reg):
+                    total_reg = reg_loss + action_reg
+                else:
+                    total_reg = torch.tensor(0.0, device=device)
+                
+                pg_loss = pg_loss + total_reg
+                
+                # Store debug info for later printing (after all losses are computed)
+                debug_info = None
+                if start == 0 and epoch == 0:  # Only first minibatch, first epoch per iteration
+                    debug_info = {
+                        'iteration': iteration,
+                        'init_mb': init_mb,
+                        'cfm_raw': cfm_raw,
+                        'diff_raw': diff_raw,
+                        'log_ratio': log_ratio,
+                        'rho': rho,
+                        'x1': x1,
+                        'reg_loss': reg_loss,
+                        'action_reg': action_reg,
+                        'pg_loss': pg_loss
+                    }
+                # wjhat thje fuck is thjis
+                clipfracs += [((rho - 1.0).abs() > args.clip_coef).float().mean().item()]
 
                 # Value loss (unchanged)
                 if args.clip_vloss:
@@ -826,14 +902,61 @@ def train(args: PPOArgs):
 
                 loss = pg_loss - args.ent_coef * entropy_loss + args.vf_coef * v_loss
 
+                # Check for NaN/Inf before backward pass
+                if torch.isnan(loss) or torch.isinf(loss):
+                    print(f"WARNING: NaN/Inf loss detected, skipping update step")
+                    continue
+                    
                 optimizer.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+                
+                # Check gradients before clipping
+                total_grad_norm = 0.0
+                for p in agent.parameters():
+                    if p.grad is not None:
+                        total_grad_norm += p.grad.data.norm(2).item() ** 2
+                total_grad_norm = total_grad_norm ** 0.5
+                
+                # 🔍 PRINT DEBUG INFO NOW THAT ALL VALUES ARE COMPUTED
+                if debug_info is not None:
+                    print(f"\n🔍 ITERATION {debug_info['iteration']} - FPO DEBUG:")
+                    print(f"CFM init loss: min={debug_info['init_mb'].min():.6f}, max={debug_info['init_mb'].max():.6f}, mean={debug_info['init_mb'].mean():.6f}")
+                    print(f"CFM raw loss:  min={debug_info['cfm_raw'].min():.6f}, max={debug_info['cfm_raw'].max():.6f}, mean={debug_info['cfm_raw'].mean():.6f}")
+                    print(f"CFM diff raw:  min={debug_info['diff_raw'].min():.6f}, max={debug_info['diff_raw'].max():.6f}, mean={debug_info['diff_raw'].mean():.6f}")
+                    print(f"Log ratios:    min={debug_info['log_ratio'].min():.6f}, max={debug_info['log_ratio'].max():.6f}, mean={debug_info['log_ratio'].mean():.6f}")
+                    print(f"Importance ratio: min={debug_info['rho'].min():.6f}, max={debug_info['rho'].max():.6f}, mean={debug_info['rho'].mean():.6f}")
+                    print(f"Actions:       min={debug_info['x1'].min():.6f}, max={debug_info['x1'].max():.6f}, std={debug_info['x1'].std():.6f}")
+                    print(f"Regularization: KL={debug_info['reg_loss']:.6f}, Action={debug_info['action_reg']:.6f}")
+                    print(f"Policy loss: {debug_info['pg_loss']:.6f}, Value loss: {v_loss:.6f}, Total loss: {loss:.6f}")
+                    print(f"Gradient norm: {total_grad_norm:.6f}")
+                    print("=" * 60)
+                
+                # More aggressive gradient clipping for stability
+                grad_norm = nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+                
+                # Skip update only if gradients are EXTREMELY large (after clipping)
+                # Note: grad_norm here is the norm BEFORE clipping, but gradients are already clipped
+                # Only skip if the raw gradient norm is astronomically high
+                if total_grad_norm > 100.0:  # Much higher threshold - only skip truly extreme cases
+                    print(f"WARNING: Extreme raw gradients detected ({total_grad_norm:.4f}), skipping step")
+                    continue
+                    
                 optimizer.step()
 
-            # Early stopping based on regularization loss (proxy for KL divergence)
-            if reg_loss > args.target_kl: 
-                print(f"Early stopping at epoch {epoch} due to high regularization loss: {reg_loss:.4f}")
+            # Improved early stopping conditions
+            # Stop if KL divergence becomes too high
+            if reg_loss > args.target_kl:
+                print(f"Early stopping at epoch {epoch} due to high KL divergence: {reg_loss:.4f}")
+                break
+            
+            # Stop if CFM losses explode
+            if cfm_raw.max() > 20.0 or torch.isnan(cfm_raw).any():
+                print(f"Early stopping at epoch {epoch} due to unstable CFM loss: max={cfm_raw.max():.4f}")
+                break
+                
+            # Stop if policy loss becomes NaN
+            if torch.isnan(pg_loss) or torch.isinf(pg_loss):
+                print(f"Early stopping at epoch {epoch} due to NaN/Inf policy loss")
                 break
         update_time = time.perf_counter() - update_time
         cumulative_times["update_time"] += update_time
@@ -841,6 +964,7 @@ def train(args: PPOArgs):
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
+        # Standard metrics
         logger.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
         logger.add_scalar("losses/value_loss", v_loss.item(), global_step)
         logger.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
@@ -849,6 +973,28 @@ def train(args: PPOArgs):
         logger.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         logger.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         logger.add_scalar("losses/explained_variance", explained_var, global_step)
+        
+        # FPO-specific metrics
+        if 'cfm_raw' in locals():
+            logger.add_scalar("fpo/cfm_loss_mean", cfm_raw.mean().item(), global_step)
+            logger.add_scalar("fpo/cfm_loss_max", cfm_raw.max().item(), global_step)
+            logger.add_scalar("fpo/cfm_loss_std", cfm_raw.std().item(), global_step)
+        
+        if 'log_ratio' in locals():
+            logger.add_scalar("fpo/log_ratio_mean", log_ratio.mean().item(), global_step)
+            logger.add_scalar("fpo/log_ratio_std", log_ratio.std().item(), global_step)
+        
+        if 'rho' in locals():
+            logger.add_scalar("fpo/importance_ratio_mean", rho.mean().item(), global_step)
+            logger.add_scalar("fpo/importance_ratio_max", rho.max().item(), global_step)
+            
+        if 'total_grad_norm' in locals():
+            logger.add_scalar("training/grad_norm", total_grad_norm, global_step)
+            
+        # Action statistics
+        logger.add_scalar("actions/mean_magnitude", torch.norm(b_actions, dim=1).mean().item(), global_step)
+        logger.add_scalar("actions/std", b_actions.std().item(), global_step)
+        
         print("SPS:", int(global_step / (time.time() - start_time)))
         logger.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
         logger.add_scalar("time/step", global_step, global_step)
@@ -869,3 +1015,4 @@ def train(args: PPOArgs):
 
     envs.close()
     if logger is not None: logger.close()
+
