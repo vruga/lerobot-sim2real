@@ -102,42 +102,6 @@ uv sync --all-extras --dev
 
 ```
 
-## Hardware Support
-
-### Supported Robots
-- **SO100 Robot Arm** (primary support)
-- **SO101 Robot Arm** (experimental - known sim2real differences)
-
-### Camera Support
-- **OAK-D/OAK-D Pro** (via our LeRobot fork at `vruga/lerobot@pr-1363`)
-- **OpenCV cameras** 
-- **RealSense Cameras**
-
-### Getting Your LeRobot Fork
-
-If you want to use your own LeRobot fork with custom modifications:
-
-1. **Fork LeRobot**: Go to https://github.com/huggingface/lerobot and click "Fork"
-
-2. **Add your modifications**: Clone your fork and add features like OAK camera support
-
-3. **Update pyproject.toml**: Add your fork as a dependency:
-   ```toml
-   [project]
-   dependencies = [
-       "lerobot @ git+https://github.com/vruga/lerobot.git@pr-1363",
-       # ... other dependencies
-   ]
-   ```
-
-4. **Install**: Run `uv sync` to install your custom fork
-
-**Current Fork Features (pr-1363):**
-- Native OAK camera integration with `depthai` support
-- Enhanced calibration workflows for depth cameras
-- Improved multi-camera synchronization
-- Better depth-based manipulation policies
-
 ## Quick Start Tutorials
 
 ### 1. Zero-Shot RGB Sim2Real (Recommended First)
@@ -158,7 +122,7 @@ Advanced training with improved sample efficiency and stability:
 - **OAK camera not working**: Ensure `depthai` is properly installed (`uv add depthai`)
 - **Standard camera issues**: Install camera-specific drivers
 - **Calibration problems**: Use the enhanced calibration tools in the `pr-1363` branch
-- **Depth perception issues**: Verify OAK camera depth stream is working
+- **OAK-D CAMERA** only supports usb-3 ports. 
 
 
 
