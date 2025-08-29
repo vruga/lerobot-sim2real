@@ -1,0 +1,17 @@
+[project]
+name = "lerobot_sim2real"
+version = "0.1.0"
+description = "Sim2Real Manipulation with LeRobot"
+requires-python = ">=3.9"
+dependencies = [
+    "mani_skill_nightly",
+    "tensorboard",
+    "wandb"
+]
+
+[build-system]
+requires = ["setuptools>=62.3.0"]
+build-backend = "setuptools.build_meta"
+
+
+
