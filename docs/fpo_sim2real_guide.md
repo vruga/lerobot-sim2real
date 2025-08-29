@@ -55,9 +55,19 @@ Since you've completed the [zero-shot RGB tutorial](zero_shot_rgb_sim2real.md), 
 - Background greenscreen image captured (Section 1.3 of zero-shot guide)  
 - `env_config.json` properly configured with greenscreen path
 
-![](./assets/example_greenscreen.png)
 
-![](./assets/example_camera_alignment.png)
+<p align="center">
+  <img src="./assets/example_greenscreen.png" width="600"/>
+  <br>
+  <em>Example greenscreen</em>
+</p>
+
+
+<p align="center">
+  <img src="./assets/example_camera_alignment.png" width="600"/>
+  <br>
+  <em>Example Camera Alignment </em>
+</p>
 
 If you need to revisit these steps, refer to sections 1.1-1.3 of the [zero-shot RGB sim2real guide](zero_shot_rgb_sim2real.md).
 
@@ -190,9 +200,12 @@ python lerobot_sim2real/scripts/eval_fpo_rgb.py --env_id="SO100GraspCube-v1" --e
 ```
 For safety reasons we recommend you run the script above with --no-continuous-eval first, which forces the robot to wait for you to press enter into the command line before it takes each action.
 
-![FPO on hardware](./assets/fpo_sim2real.gif)
 
-https://github.com/vruga/lerobot-sim2real/blob/main/docs/assets/60.mp4
+<p align="center">
+  <img src="./assets/fpo_sim2real.gif" width="600"/>
+  <br>
+  <em>FPO on hardware</em>
+</p>
 
 
 ## Frequently Asked Questions
