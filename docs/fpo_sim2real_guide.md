@@ -190,7 +190,9 @@ python lerobot_sim2real/scripts/eval_fpo_rgb.py --env_id="SO100GraspCube-v1" --e
 ```
 For safety reasons we recommend you run the script above with --no-continuous-eval first, which forces the robot to wait for you to press enter into the command line before it takes each action.
 
-![](./assets/fpo_sim2real.gif)
+![FPO on hardware](./assets/fpo_sim2real.gif)
+
+https://github.com/vruga/lerobot-sim2real/blob/main/docs/assets/60.mp4
 
 
 ## Frequently Asked Questions
