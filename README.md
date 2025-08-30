@@ -144,10 +144,3 @@ If you use this codebase in your research, please cite both ManiSkill and this r
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- **ManiSkill Team**: For the excellent simulation framework
-- **HuggingFace LeRobot**: For the hardware interface and robotics toolkit  
-- **Community Contributors**: Everyone who has contributed code, documentation, and feedback
-- **Hardware Partners**: SO100/SO101 robot arm manufacturers and camera vendors
