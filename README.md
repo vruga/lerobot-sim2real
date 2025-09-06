@@ -12,6 +12,16 @@ Note that this project is still in a very early stage. There are many ways the s
 
 If you find this project useful, give this repo and [ManiSkill](https://github.com/haosulab/ManiSkill) a star! If you are using [SO100](https://github.com/TheRobotStudio/SO-ARM100/)/[LeRobot](https://github.com/huggingface/lerobot), make sure to also give them a star. 
 
+## Blog and Project Report
+(Eklavya 2025)
+The blog we wrote -
+[PPO to FPO: Why Flow Policies are better](https://blog.sravjti.in/2025/08/14/flow-models-for-better-policies.html)
+
+
+Project Report -
+[RLFFP Core](https://github.com/Dimios45/rlffp)
+
+
 ## Getting Started
 
 ### Prerequisites
