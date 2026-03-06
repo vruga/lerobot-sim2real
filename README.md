@@ -115,11 +115,19 @@ Train a PPO agent in simulation and deploy zero-shot to real hardware:
 - **Time**: ~2-3 hours training on RTX 4090
 - **Hardware**: SO100 + any RGB camera
 
-### 2. Flow Policy Optimization (FPO) 
+### 2. Flow Policy Optimization (FPO)
 Advanced training with improved sample efficiency and stability:
 - **Tutorial**: [FPO Sim2Real Guide](./docs/fpo_sim2real_guide.md)
 - **Time**: ~2-3 hours training on RTX 4090
 - **Hardware**: SO100 + RGB camera
+
+### 3. Flow Policy Optimization ++ (FPO++)
+State-of-the-art training with per-sample ratio clipping and asymmetric trust regions:
+- **Algorithm**: FPO++ with ASPO (Asymmetric SPO) for enhanced stability
+- **Features**: Per-sample ratio clipping, asymmetric trust regions for positive/negative advantages
+- **Time**: ~2-3 hours training on RTX 4090
+- **Hardware**: SO100 + RGB camera
+- **Files**: `lerobot_sim2real/rl/fpo_plus_plus_rgb.py`, `fpo_plus_plus_run.sh`
 
 
 #### LeRobot Hardware Issues

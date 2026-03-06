@@ -66,6 +66,8 @@ class PPOArgs:
     # Algorithm specific arguments
     env_id: str = "PickCube-v1"
     """the id of the environment"""
+    obs_mode: str = "rgb+segmentation"
+    """observation mode: 'state' for state-only (fast, tractable), 'rgb+segmentation' for vision"""
     env_kwargs: dict = field(default_factory=dict)
     """extra environment kwargs to pass to the environment"""
     include_state: bool = True
@@ -73,7 +75,9 @@ class PPOArgs:
     total_timesteps: int = 10000000
     """total timesteps of the experiments"""
     learning_rate: float = 2e-4
-    """the learning rate of the optimizer"""
+    """the learning rate of the actor (feature net + flow policy)"""
+    critic_learning_rate: float = 1e-3
+    """the learning rate of the critic (value head); typically 3-10x higher than actor"""
     num_envs: int = 512
     """the number of parallel environments"""
     num_eval_envs: int = 8
@@ -300,6 +304,18 @@ class DiffusionPolicy(FeedForwardNN):
 
         return loss
 
+class BoxToDictObsWrapper(gym.ObservationWrapper):
+    """Wraps a flat Box observation space into {'state': obs} dict for state-only mode."""
+    def __init__(self, env):
+        super().__init__(env)
+        assert isinstance(env.single_observation_space, gym.spaces.Box), \
+            "BoxToDictObsWrapper expects a Box observation space"
+        self.observation_space = gym.spaces.Dict({"state": env.single_observation_space})
+
+    def observation(self, obs):
+        return {"state": obs}
+
+
 class DictArray(object):
     def __init__(self, buffer_shape, element_space, data_dict=None, device=None):
         self.buffer_shape = buffer_shape
@@ -355,57 +371,49 @@ class NatureCNN(nn.Module):
         super().__init__()
 
         extractors = {}
-
         self.out_features = 0
         feature_size = 256
-        in_channels=sample_obs["rgb"].shape[-1]
-        image_size=(sample_obs["rgb"].shape[1], sample_obs["rgb"].shape[2])
 
-
-        # here we use a NatureCNN architecture to process images, but any architecture is permissble here
-        cnn = nn.Sequential(
-            nn.Conv2d(
-                in_channels=in_channels,
-                out_channels=32,
-                kernel_size=8,
-                stride=4,
-                padding=0,
-            ),
-            nn.ReLU(),
-            nn.Conv2d(
-                in_channels=32, out_channels=64, kernel_size=4, stride=2, padding=0
-            ),
-            nn.ReLU(),
-            nn.Conv2d(
-                in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=0
-            ),
-            nn.ReLU(),
-            nn.Flatten(),
-        )
-
-        # to easily figure out the dimensions after flattening, we pass a test tensor
-        with torch.no_grad():
-            n_flatten = cnn(sample_obs["rgb"].float().permute(0,3,1,2).cpu()).shape[1]
-            fc = nn.Sequential(nn.Linear(n_flatten, feature_size), nn.ReLU())
-        extractors["rgb"] = nn.Sequential(cnn, fc)
-        self.out_features += feature_size
+        if "rgb" in sample_obs:
+            in_channels = sample_obs["rgb"].shape[-1]
+            cnn = nn.Sequential(
+                nn.Conv2d(in_channels=in_channels, out_channels=32, kernel_size=8, stride=4, padding=0),
+                nn.ReLU(),
+                nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2, padding=0),
+                nn.ReLU(),
+                nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=0),
+                nn.ReLU(),
+                nn.Flatten(),
+            )
+            with torch.no_grad():
+                n_flatten = cnn(sample_obs["rgb"].float().permute(0, 3, 1, 2).cpu()).shape[1]
+                fc = nn.Sequential(nn.Linear(n_flatten, feature_size), nn.ReLU())
+            extractors["rgb"] = nn.Sequential(cnn, fc)
+            self.out_features += feature_size
 
         if "state" in sample_obs:
-            # for state data we simply pass it through a single linear layer
             state_size = sample_obs["state"].shape[-1]
-            extractors["state"] = nn.Linear(state_size, 256)
-            self.out_features += 256
+            # Larger MLP for state-only mode; smaller when combined with RGB
+            hidden = 256 if "rgb" in sample_obs else 512
+            extractors["state"] = nn.Sequential(
+                layer_init(nn.Linear(state_size, hidden)),
+                nn.ReLU(),
+                layer_init(nn.Linear(hidden, hidden)),
+                nn.ReLU(),
+            )
+            self.out_features += hidden
 
+        assert self.out_features > 0, "sample_obs must contain 'rgb' and/or 'state'"
         self.extractors = nn.ModuleDict(extractors)
 
     def forward(self, observations) -> torch.Tensor:
         encoded_tensor_list = []
-        # self.extractors contain nn.Modules that do all the processing.
         for key, extractor in self.extractors.items():
             obs = observations[key]
             if key == "rgb":
-                obs = obs.float().permute(0,3,1,2)
-                obs = obs / 255
+                obs = obs.float().permute(0, 3, 1, 2) / 255.0
+            else:
+                obs = obs.float()
             encoded_tensor_list.append(extractor(obs))
         return torch.cat(encoded_tensor_list, dim=1)
 
@@ -536,10 +544,11 @@ def compute_fpo_plus_plus_objective(ratio, advantage, clip_coef, per_sample_clip
                                   torch.min(ratio * advantage, ppo_clipped_ratio * advantage),
                                   ratio * advantage)  # Don't clip for negative advantages yet
             
-            # SPO-style quadratic penalty for negative advantages
-            spo_penalty = torch.abs(advantage) * clip_coef / 2 * (ratio - 1)**2  # Eq. 11
+            # SPO-style quadratic penalty for negative advantages (Eq. 11)
+            # ψ_SPO = ρ·Â − (|Â| / (2·ε)) · (ρ−1)²
+            spo_penalty = torch.abs(advantage) / (2 * clip_coef) * (ratio - 1)**2
             spo_loss = ratio * advantage - spo_penalty
-            
+
             # Combine: PPO for positive, SPO for negative
             final_loss = torch.where(pos_adv_mask, ppo_loss, spo_loss)
         else:
@@ -550,18 +559,18 @@ def compute_fpo_plus_plus_objective(ratio, advantage, clip_coef, per_sample_clip
         # Original FPO: Average ratios before clipping (not recommended for FPO++)
         avg_ratio = torch.mean(ratio, dim=1, keepdim=True)  # [batch_size, 1]
         expanded_avg_ratio = avg_ratio.expand_as(ratio)  # [batch_size, num_samples]
-        
+
         if asymmetric_trust_region:
             pos_adv_mask = advantage >= 0
-            
+
             # PPO-style clipping for positive advantages
             ppo_clipped_ratio = torch.clamp(expanded_avg_ratio, 1.0 - clip_coef, 1.0 + clip_coef)
-            ppo_loss = torch.where(pos_adv_mask, 
+            ppo_loss = torch.where(pos_adv_mask,
                                   torch.min(expanded_avg_ratio * advantage, ppo_clipped_ratio * advantage),
                                   expanded_avg_ratio * advantage)
-            
+
             # SPO-style quadratic penalty for negative advantages (Eq. 11)
-            spo_penalty = torch.abs(advantage) * clip_coef / 2 * (expanded_avg_ratio - 1)**2
+            spo_penalty = torch.abs(advantage) / (2 * clip_coef) * (expanded_avg_ratio - 1)**2
             spo_loss = expanded_avg_ratio * advantage - spo_penalty
             
             # Combine: PPO for positive, SPO for negative
@@ -594,7 +603,7 @@ def train(args: PPOArgs):
 
     # env setup
     env_kwargs = dict(
-        obs_mode="rgb+segmentation", render_mode=args.render_mode, sim_backend="physx_cuda",
+        obs_mode=args.obs_mode, render_mode=args.render_mode, sim_backend="physx_cuda",
     )
     if args.control_mode is not None:
         env_kwargs["control_mode"] = args.control_mode
@@ -615,9 +624,15 @@ def train(args: PPOArgs):
         if hasattr(envs.unwrapped, 'base_camera_settings'):
             envs.unwrapped.base_camera_settings = base_camera_settings
 
-    # rgbd obs mode returns a dict of data, we flatten it so there is just a rgbd key and state key
-    envs = FlattenRGBDObservationWrapper(envs, rgb=True, depth=False, state=args.include_state)
-    eval_envs = FlattenRGBDObservationWrapper(eval_envs, rgb=True, depth=False, state=args.include_state)
+    # Flatten observations into a dict with 'rgb' and/or 'state' keys
+    if args.obs_mode == "state":
+        # State mode: obs is a flat Box — wrap into {"state": obs}
+        envs = BoxToDictObsWrapper(envs)
+        eval_envs = BoxToDictObsWrapper(eval_envs)
+    else:
+        # RGB mode: flatten camera + state into {"rgb": ..., "state": ...}
+        envs = FlattenRGBDObservationWrapper(envs, rgb=True, depth=False, state=args.include_state)
+        eval_envs = FlattenRGBDObservationWrapper(eval_envs, rgb=True, depth=False, state=args.include_state)
 
     if isinstance(envs.action_space, gym.spaces.Dict):
         envs = FlattenActionSpaceWrapper(envs)
@@ -689,7 +704,14 @@ def train(args: PPOArgs):
     print(f"args.minibatch_size={args.minibatch_size} args.batch_size={args.batch_size} args.update_epochs={args.update_epochs}")
     print(f"####")
     agent = Agent(envs, sample_obs=next_obs, args=args).to(device)
-    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+    # Separate LR for critic (value head) vs actor (feature net + flow policy).
+    # Paper uses actor_lr=1e-5, critic_lr=1e-4 for manipulation fine-tuning.
+    optimizer = optim.Adam([
+        {'params': list(agent.feature_net.parameters()) + list(agent.actor_dp.parameters()),
+         'lr': args.learning_rate},
+        {'params': list(agent.critic.parameters()),
+         'lr': args.critic_learning_rate},
+    ], eps=1e-5)
 
     if args.checkpoint:
         agent.load_state_dict(torch.load(args.checkpoint))
@@ -733,8 +755,8 @@ def train(args: PPOArgs):
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
             frac = 1.0 - (iteration - 1.0) / args.num_iterations
-            lrnow = frac * args.learning_rate
-            optimizer.param_groups[0]["lr"] = lrnow
+            optimizer.param_groups[0]["lr"] = frac * args.learning_rate
+            optimizer.param_groups[1]["lr"] = frac * args.critic_learning_rate
         rollout_time = time.perf_counter()
         for step in range(0, args.num_steps):
             global_step += args.num_envs
@@ -949,7 +971,8 @@ def train(args: PPOArgs):
             logger.add_scalar("losses/approx_kl", approx_kl, global_step)
             logger.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
             logger.add_scalar("losses/explained_variance", explained_var, global_step)
-            logger.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
+            logger.add_scalar("charts/actor_lr", optimizer.param_groups[0]["lr"], global_step)
+            logger.add_scalar("charts/critic_lr", optimizer.param_groups[1]["lr"], global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
 
     if logger is not None:
